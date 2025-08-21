@@ -10,7 +10,7 @@ const Layout = () => {
   return (
     <div className="flex flex-col">
       <Navbar />
-      {banner && <Banner message={banner.message} type={banner.type} />}
+      <Banner message={banner?.message} type={banner?.type} />
       <div className="flex-1 my-40">
         <Outlet />
       </div>
