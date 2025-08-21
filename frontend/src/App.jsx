@@ -1,6 +1,6 @@
-import VideoUpload from './views/videoUpload'
-import { Routes, Route, BrowserRouter } from 'react-router-dom'
-import Layout from './layout/layout'
+import VideoUpload from "./views/videoUpload";
+import { Routes, Route, BrowserRouter } from "react-router-dom";
+import Layout from "./layout/layout";
 
 function App() {
   return (
@@ -11,7 +11,7 @@ function App() {
         </Route>
       </Routes>
     </BrowserRouter>
-  )
+  );
 }
 
-export default App
+export default App;
