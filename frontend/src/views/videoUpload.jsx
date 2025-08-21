@@ -1,5 +1,5 @@
 import { useDispatch } from 'react-redux';
-import { setVideo, setBanner } from '../redux/slices/videoSlice';
+import { setVideo, setBannerThunk } from '../redux/slices/videoSlice';
 import { useRef } from 'react';
 
 function VideoUpload() {
@@ -10,12 +10,9 @@ function VideoUpload() {
     const file = event.target.files[0];
     if (file) {
       dispatch(setVideo(file));
-      dispatch(setBanner({ message: "Video uploaded successfully", type: "success" }));
-      setTimeout(() => {
-        dispatch(setBanner(null));
-      }, 2000);
+      dispatch(setBannerThunk("Video uploaded successfully", "success"));
     } else {
-      dispatch(setBanner({ message: "No video file selected", type: "error" }));
+      dispatch(setBannerThunk("No video file selected", "error"));
     }
   };
 
