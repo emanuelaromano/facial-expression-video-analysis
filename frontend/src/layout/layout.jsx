@@ -8,10 +8,10 @@ const Layout = () => {
     const banner = useSelector((state) => state.video.banner)
 
     return (
-        <div className="flex flex-col min-h-screen">
+        <div className="flex flex-col">
             <Navbar />
             {banner && <Banner message={banner.message} type={banner.type} />}
-            <div className="flex-1">
+            <div className="flex-1 my-40">
                 <Outlet />
             </div>
             <Footer />
