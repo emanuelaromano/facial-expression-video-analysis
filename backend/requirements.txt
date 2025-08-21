@@ -1,0 +1,11 @@
+openai-whisper==20250625
+python-dotenv==1.1.1
+opencv-python==4.12.0.88
+openai==1.101.0
+psutil==7.0.0
+fastapi==0.116.1
+deepface==0.0.95
+mediapipe==0.10.2
+uvicorn==0.35.0
+moviepy==2.2.1
+# Python 3.11.13

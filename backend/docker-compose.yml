@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  deepface-app:
+    build: .
+    container_name: deepface_app
+    volumes:
+      - .:/app
+    ports:
+      - "3000:3000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python streamlit_app.py
