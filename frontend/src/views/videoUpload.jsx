@@ -225,7 +225,7 @@ function VideoUpload() {
             </div>
             <div className="w-120 flex justify-center mt-4 px-10">
               <button className="bg-white border-2 border-gray-300 hover:border-[var(--pink-500)] text-[var(--pink-500)] font-bold py-2 w-full rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl z-10">
-                Analyze
+                Run Analysis
               </button>
             </div>
           </div>

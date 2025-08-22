@@ -13,8 +13,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import mediapipe as mp
 from threading import Lock
 from typing import Optional
+from openai import OpenAI
 
 router = APIRouter(prefix="/video")
+client = OpenAI()
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -51,6 +53,7 @@ def analyze_video(
     background_tasks: BackgroundTasks,
     uuid: str = Form(...),
     original_video: UploadFile = File(...),
+    job_description: str = Form("Data Engineer"),
 ) -> FileResponse:
     temp_dir = f"temp/{uuid}"
     temp_og_video_path = os.path.join(temp_dir, "video.mp4")
@@ -130,6 +133,8 @@ def analyze_video(
         if not os.path.exists(rebuilt_video_path):
             logger.error("rebuilt video not found at %s", rebuilt_video_path)
             raise HTTPException(status_code=500, detail="Failed to build output video")
+        
+        spoken_content_analysis = analyze_spoken_content(audio_path, job_description)
 
         # Schedule cleanup AFTER the response is sent
         background_tasks.add_task(shutil.rmtree, temp_dir, True)
@@ -418,19 +423,26 @@ def rebuild_video_ffmpeg(frames_dir: str, audio_path: Optional[str], output_path
 # Transcript analysis functions
 #################################
 
-def extract_audio(video_path: str) -> str:
-    # TODO: Extract the audio from the video and return the audio path
-    # This function is kept for future transcript analysis features
-    pass
+def transcribe_audio(audio_path: str) -> str:
+    with open(audio_path, "rb") as f:
+        transcript = client.audio.transcriptions.create(
+            model="gpt-4o-mini-transcribe",
+            file=f,
+        )
+    return transcript.text or ""
 
-def audio_transcription(video_path: str) -> str:
-    # TODO: Transcribe the audio of the video using OpenAI Whisper
-    # This function is kept for future transcript analysis features
-    pass
+def analyze_spoken_content(audio_path: str, job_description: str) -> str:
+    transcript = transcribe_audio(audio_path).strip()
+    if not transcript:
+        return "Transcript analysis could not be completed."
 
-def analyze_transcription(transcription: str) -> str:
-    # TODO: Analyze the transcription using OpenAI and return the analysis.
-    # The LLM should act as a career coach, giving feedback to the candidate based on the quality of the content.
-    # This function is kept for future transcript analysis features
-    pass
-
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system",
+             "content": f"You are a career coach. Analyze the following interview answer and give concise, actionable feedback. The job description is: {job_description}"},
+            {"role": "user", "content": transcript},
+        ],
+        temperature=0.2,
+    )
+    return resp.choices[0].message.content
