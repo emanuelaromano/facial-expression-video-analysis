@@ -153,12 +153,13 @@ def analyze_frame(frame_path: str, frame_index: int) -> dict | None:
             "confidence": confidence
         }
     except Exception as e:
-        logger.warning(f"Error analyzing frame {frame_index}: {e}")
-    return {
-        "face_mesh": None,
-        "emotion": None,
-        "confidence": None
-    }
+        logger.warning(f"Unexpected error analyzing frame {frame_index}: {e}")
+        # Return empty dict instead of None to avoid KeyError in rebuild loop
+        return {
+            "face_mesh": None,
+            "emotion": None,
+            "confidence": None
+        }
 
 
 def emotion_analysis(frame_path: str, frame_index: int):
@@ -166,12 +167,26 @@ def emotion_analysis(frame_path: str, frame_index: int):
     if frame_image is None:
         logger.warning(f"Frame {frame_index} could not be read for emotion analysis.")
         return None, None
+    detectors = ["opencv", "retinaface", "mtcnn", "dlib", "ssd", "yolo"]
+    detectors.remove(DETECTOR_BACKEND)
     result = DeepFace.analyze(
         frame_image,
         actions=['emotion'],
         enforce_detection=False,
         detector_backend=DETECTOR_BACKEND
     )[0]
+    while result is None and detectors:
+        detector = detectors.pop(0)
+        logger.info(f"Trying emotion analysis with {detector} for frame {frame_index}")
+        result = DeepFace.analyze(
+            frame_image,
+            actions=['emotion'],
+            enforce_detection=False,
+            detector_backend=detector
+        )[0]
+    if result is None:
+        logger.warning(f"All emotion analysis attempts failed for frame {frame_index}")
+        return None, None
     emotion_scores = result.get("emotion", {})
     if emotion_scores:
         top_emotion = max(emotion_scores, key=emotion_scores.get)
@@ -210,9 +225,18 @@ def face_mesh_analysis(frame_path: str, frame_index: int):
     return faces
 
 
-def rebuild_frame(frame_index: int, temp_frames_dir: str, temp_processed_dir: str, expression: Optional[dict] = None) -> None:
+def rebuild_frame(
+    frame_index: int,
+    temp_frames_dir: str,
+    temp_processed_dir: str,
+    expression: Optional[dict] = None
+) -> None:
+    logger.info(f"Rebuilding frame {frame_index}")
     frame_path = os.path.join(temp_frames_dir, f"{frame_index}.jpg")
     frame_image = cv2.imread(frame_path)
+    if frame_image is None:
+        return
+
     height, width = frame_image.shape[:2]
 
     faces = None
@@ -221,20 +245,34 @@ def rebuild_frame(frame_index: int, temp_frames_dir: str, temp_processed_dir: st
 
     if faces:
         for face in faces:
+            # Each point: {"x": float, "y": float, "z": float}
             for pt in face:
-                x = int(pt["x"] * width)
-                y = int(pt["y"] * height)
-                cv2.circle(frame_image, (x, y), 1, (0, 255, 0), thickness=-1, lineType=cv2.LINE_AA)
+                # Clamp just in case normalized coords slightly leave [0,1]
+                x = int(max(0, min(1, float(pt.get("x", 0.0)))) * width)
+                y = int(max(0, min(1, float(pt.get("y", 0.0)))) * height)
+                cv2.circle(
+                    frame_image,
+                    (x, y),
+                    1,
+                    (0, 255, 0),
+                    thickness=-1,
+                    lineType=cv2.LINE_AA,
+                )
 
-    label_lines = []
+    label_lines: list[str] = []
     if isinstance(expression, dict):
         emotion = expression.get("emotion")
         confidence = expression.get("confidence")
+        # Only draw the box when BOTH are present
         if emotion is not None and confidence is not None:
+            try:
+                conf_val = float(confidence)
+            except (TypeError, ValueError):
+                conf_val = None
+
             label_lines.append(str(emotion).upper())
-            label_lines.append(f"Conf: {float(confidence):.2f}")
-        elif faces:
-            label_lines.append("MESH")
+            if conf_val is not None:
+                label_lines.append(f"Conf: {conf_val:.2f}")
 
     if label_lines:
         padding = 8
@@ -243,22 +281,35 @@ def rebuild_frame(frame_index: int, temp_frames_dir: str, temp_processed_dir: st
         font_scale = 0.5
         thickness = 1
 
+        # Compute max line width
         max_text_w = 0
         for line in label_lines:
             (text_width, _), _ = cv2.getTextSize(line, font, font_scale, thickness)
-            max_text_w = max(max_text_w, text_width)
+            if text_width > max_text_w:
+                max_text_w = text_width
 
-        box_w = max_text_w + 2 * padding
-        box_h = line_gap * len(label_lines) + 2 * padding
+        box_w = int(max_text_w + 2 * padding)
+        box_h = int(line_gap * len(label_lines) + 2 * padding)
 
         top_left = (10, 10)
         bottom_right = (10 + box_w, 10 + box_h)
-        cv2.rectangle(frame_image, top_left, bottom_right, (30, 30, 30), thickness=-1)
+        cv2.rectangle(
+            frame_image, top_left, bottom_right, (30, 30, 30), thickness=-1
+        )
 
-        # Put text
+        # Text lines
         y = 10 + padding + 12
         for line in label_lines:
-            cv2.putText(frame_image, line, (10 + padding, y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+            cv2.putText(
+                frame_image,
+                line,
+                (10 + padding, y),
+                font,
+                font_scale,
+                (255, 255, 255),
+                thickness,
+                cv2.LINE_AA,
+            )
             y += line_gap
 
     os.makedirs(temp_processed_dir, exist_ok=True)
