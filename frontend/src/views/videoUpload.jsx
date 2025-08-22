@@ -238,7 +238,7 @@ function VideoUpload() {
         Upload Your Video
       </h1>
       <div className="bg-white p-8 rounded-lg shadow-lg border-2 border-dashed border-gray-300 hover:border-[var(--pink-500)] transition-colors">
-        <div className="text-center w-120 mx-auto">
+        <div className="text-center w-160 mx-auto">
           <div className="mb-4">
             <svg
               className="mx-auto h-12 w-12 text-gray-400"
@@ -307,7 +307,7 @@ function VideoUpload() {
                 </div>
               )}
             </div>
-            <div className="w-120 flex flex-col gap-4 justify-center mt-4 px-10">
+            <div className="w-160 flex flex-col gap-4 justify-center mt-4 px-10">
               {analyzing && (
                 <div className="flex flex-row gap-2 items-center">
                   <div className="w-full h-2 bg-gray-200 rounded-full">
