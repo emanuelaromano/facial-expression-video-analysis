@@ -14,6 +14,7 @@ import mediapipe as mp
 from threading import Lock
 from typing import Optional
 from openai import OpenAI
+from zipfile import ZipFile, ZIP_DEFLATED
 
 router = APIRouter(prefix="/video")
 client = OpenAI()
@@ -61,6 +62,9 @@ def analyze_video(
     temp_processed_dir = os.path.join(temp_dir, "processed")
     temp_audio_path = os.path.join(temp_dir, "audio.m4a")
     temp_rebuilt_video_path = os.path.join(temp_dir, "rebuilt_video.mp4")
+    bundle_path = os.path.join(temp_dir, f"{uuid}.zip")
+    analysis_path = os.path.join(temp_dir, "spoken_content_analysis.txt")
+
     logger.info(f"Analyzing video {uuid}")
 
     try:
@@ -76,9 +80,8 @@ def analyze_video(
             logger.warning("Audio extraction failed - video will be silent")
         num_frames = split_video_into_frames(temp_og_video_path, temp_frames_dir)
 
-        expressions = {}
-
         # Analyze only needed frames
+        expressions = {}
         needed_idxs = sorted(
             set(range(0, num_frames, FACE_MESH_EVERY)) |
             set(range(0, num_frames, EMOTION_EVERY))
@@ -89,7 +92,6 @@ def analyze_video(
                 executor.submit(analyze_frame, os.path.join(temp_frames_dir, f"{i}.jpg"), i): i
                 for i in needed_idxs
             }
-
             for future in as_completed(futures):
                 idx = futures[future]
                 result = future.result()
@@ -97,29 +99,27 @@ def analyze_video(
                 logger.info(f"Analyzed frame {idx}/{num_frames}")
 
         # Rebuild frames using most recent analyzed indices
-        # Exponential smoothing for emotion confidence to reduce flicker
         alpha = 0.4
         last_label = None
         last_conf = None
 
         for i in range(num_frames):
-            mesh_idx = (i // FACE_MESH_EVERY) * FACE_MESH_EVERY
-            emo_idx = (i // EMOTION_EVERY) * EMOTION_EVERY
-            mesh_idx = min(mesh_idx, num_frames - 1)
-            emo_idx = min(emo_idx,  num_frames - 1)
+            mesh_idx = min((i // FACE_MESH_EVERY) * FACE_MESH_EVERY, num_frames - 1)
+            emo_idx  = min((i // EMOTION_EVERY)  * EMOTION_EVERY,  num_frames - 1)
 
             mesh_expression = expressions.get(str(mesh_idx), {}) or {}
             emotion_expression = expressions.get(str(emo_idx), {}) or {}
 
             label = emotion_expression.get("emotion")
-            conf = emotion_expression.get("confidence")
+            conf  = emotion_expression.get("confidence")
 
             if label is None:
                 label = last_label
             if isinstance(conf, (int, float)) and isinstance(last_conf, (int, float)):
                 conf = alpha * conf + (1 - alpha) * last_conf
+
             last_label = label
-            last_conf = conf
+            last_conf  = conf
 
             final_expression = {
                 "face_mesh": mesh_expression.get("face_mesh"),
@@ -128,26 +128,36 @@ def analyze_video(
             }
             rebuild_frame(i, temp_frames_dir, temp_processed_dir, final_expression)
 
-        rebuilt_video_path = rebuild_video_ffmpeg(temp_processed_dir, audio_path, temp_rebuilt_video_path, fps)
-
+        # Rebuild video
+        rebuilt_video_path = rebuild_video_ffmpeg(
+            temp_processed_dir, audio_path, temp_rebuilt_video_path, fps
+        )
         if not os.path.exists(rebuilt_video_path):
             logger.error("rebuilt video not found at %s", rebuilt_video_path)
             raise HTTPException(status_code=500, detail="Failed to build output video")
-        
-        spoken_content_analysis = analyze_spoken_content(audio_path, job_description)
 
-        # Schedule cleanup AFTER the response is sent
-        background_tasks.add_task(shutil.rmtree, temp_dir, True)
+        # Spoken-content analysis (guard for missing audio)
+        analyze_spoken_content(audio_path, job_description, analysis_path)
 
-        # Return the mp4 file
+        # Bundle video + analysis into a ZIP
+        with ZipFile(bundle_path, "w", compression=ZIP_DEFLATED) as zf:
+            zf.write(rebuilt_video_path, arcname=f"{uuid}.mp4")
+            zf.write(analysis_path, arcname="spoken_content_analysis.txt")
+
+        # Cleanup AFTER response is sent
+        background_tasks.add_task(delayed_rmtree, temp_dir, 30)
+
         return FileResponse(
-            path=rebuilt_video_path,
-            media_type="video/mp4",
-            filename=f"{uuid}.mp4"
+            path=bundle_path,
+            media_type="application/zip",
+            filename=f"{uuid}.zip",
         )
+
     except Exception as e:
         logger.exception("unexpected error in analyze_video")
+        # Best effort: if a partially created bundle exists, return a 500 instead of streaming it
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+
 
 ########################################################
 # Video processing functions
@@ -429,20 +439,30 @@ def transcribe_audio(audio_path: str) -> str:
             model="gpt-4o-mini-transcribe",
             file=f,
         )
-    return transcript.text or ""
+    return (transcript.text or "").strip()
 
-def analyze_spoken_content(audio_path: str, job_description: str) -> str:
-    transcript = transcribe_audio(audio_path).strip()
-    if not transcript:
-        return "Transcript analysis could not be completed."
+def analyze_spoken_content(audio_path: str, job_description: str, analysis_path: str) -> None:
+    spoken_content_analysis = "No audio stream found."
+    if audio_path:
+        transcript = transcribe_audio(audio_path).strip()
+        if not transcript:
+            spoken_content_analysis = "No speech detected."
+        else:
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system",
+                    "content": f"You are a career coach. Analyze the following interview answer and give concise, actionable feedback. The job description is: {job_description}"},
+                    {"role": "user", "content": transcript},
+                ],
+                temperature=0.2,
+            )
+            spoken_content_analysis = resp.choices[0].message.content
 
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system",
-             "content": f"You are a career coach. Analyze the following interview answer and give concise, actionable feedback. The job description is: {job_description}"},
-            {"role": "user", "content": transcript},
-        ],
-        temperature=0.2,
-    )
-    return resp.choices[0].message.content
+    with open(analysis_path, "w", encoding="utf-8") as f:
+        f.write(spoken_content_analysis)
+
+def delayed_rmtree(path: str, delay_seconds: int = 30):
+    import time
+    time.sleep(delay_seconds)
+    shutil.rmtree(path, ignore_errors=True)
