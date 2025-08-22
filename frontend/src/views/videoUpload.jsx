@@ -162,7 +162,9 @@ function VideoUpload() {
 
   const handleRunAnalysis = useCallback(async () => {
     if (!selectedFile) {
-      dispatch(setBannerThunk("Please upload or record a video first", "error"));
+      dispatch(
+        setBannerThunk("Please upload or record a video first", "error"),
+      );
       return;
     }
 
@@ -288,12 +290,14 @@ function VideoUpload() {
                 className="w-full min-w-[170] max-h-96 shadow-md"
                 src={processedVideoUrl ?? URL.createObjectURL(selectedFile)}
               />
-              {!processedVideoUrl && !analyzing && <div
-                onClick={resetVideoState}
-                className="absolute mt-2 mr-2 top-0 right-0"
-              >
-                <CircleX className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1" />
-              </div>}
+              {!processedVideoUrl && !analyzing && (
+                <div
+                  onClick={resetVideoState}
+                  className="absolute mt-2 mr-2 top-0 right-0"
+                >
+                  <CircleX className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1" />
+                </div>
+              )}
               {wasRecorded && !analyzing && !processedVideoUrl && (
                 <div
                   onClick={handleRecordVideo}
@@ -306,7 +310,7 @@ function VideoUpload() {
             <div className="w-120 flex flex-col gap-4 justify-center mt-4 px-10">
               {analyzing && (
                 <div className="flex flex-row gap-2 items-center">
-                <div className="w-full h-2 bg-gray-200 rounded-full">
+                  <div className="w-full h-2 bg-gray-200 rounded-full">
                     <div
                       className="h-full bg-[var(--pink-500)] rounded-full"
                       style={{ width: `${progress}%` }}
@@ -315,7 +319,16 @@ function VideoUpload() {
                   <p className="text-sm text-gray-500">{progress}%</p>
                 </div>
               )}
-              {(!processedVideoUrl && !analyzing) ? (
+              {transcriptAnalysis && (
+                <div className="w-full flex flex-col justify-center ">
+                  <div className="prose prose-pink max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {transcriptAnalysis}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              )}
+              {!processedVideoUrl && !analyzing && !transcriptAnalysis ? (
                 <button
                   onClick={handleRunAnalysis}
                   className="bg-white border-2 border-gray-300 hover:border-[var(--pink-500)] disabled:opacity-50 text-[var(--pink-500)] font-bold py-2 w-full rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl z-10"
@@ -329,24 +342,14 @@ function VideoUpload() {
                 >
                   Cancel
                 </button>
-              ) : null}
-            </div>
-            <div className="w-120 flex flex-col gap-10 justify-center mb-10">
-            {transcriptAnalysis && (
-              <div className="w-120 flex flex-col gap-4 justify-center ">
-                <div className="prose prose-pink max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {transcriptAnalysis}
-                  </ReactMarkdown>
-                </div>
-              </div>
-            )}
-            <button
+              ) : (
+                <button
                   onClick={resetVideoState}
-                  className="w-120 bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 px-6 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
+                  className="w-full bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
                 >
                   Reset
-            </button>
+                </button>
+              )}
             </div>
           </div>
         )}
