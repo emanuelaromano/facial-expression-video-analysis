@@ -2,6 +2,9 @@ import { useDispatch } from "react-redux";
 import { setBannerThunk } from "../redux/slices/videoSlice";
 import { useRef, useState, useEffect, useCallback } from "react";
 import { CircleX, RotateCcw } from "lucide-react";
+import { v4 as uuidv4 } from "uuid";
+import axios from "axios";
+import JSZip from "jszip";
 
 function VideoUpload() {
   const dispatch = useDispatch();
@@ -15,6 +18,10 @@ function VideoUpload() {
   const [cameraLoading, setCameraLoading] = useState(false);
   const [mediaStream, setMediaStream] = useState(null);
   const [wasRecorded, setWasRecorded] = useState(false);
+  const [transcriptAnalysis, setTranscriptAnalysis] = useState(null);
+  const [processedVideoUrl, setProcessedVideoUrl] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const videoId = uuidv4();
 
   const stopMediaStream = useCallback(() => {
     if (mediaStream) {
@@ -28,6 +35,8 @@ function VideoUpload() {
     setWasRecorded(false);
     setRecordVideo(false);
     setRecording(false);
+    setProcessedVideoUrl(null);
+    setTranscriptAnalysis(null);
     stopMediaStream();
     if (videoRef.current) {
       videoRef.current.srcObject = null;
@@ -142,6 +151,85 @@ function VideoUpload() {
     }
   };
 
+  const handleRunAnalysis = useCallback(async () => {
+    if (!selectedFile) {
+      dispatch(setBannerThunk("Please upload or record a video first", "error"));
+      return;
+    }
+
+    setAnalyzing(true);
+    setProcessedVideoUrl(null);
+    setTranscriptAnalysis(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("uuid", videoId);
+      formData.append("original_video", selectedFile);
+
+      // Expect a ZIP back (binary)
+      const response = await axios.post(`/video/analyze`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        responseType: "blob",
+      });
+
+      // axios uses status, not response.ok
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+
+      // Some servers may return JSON error with 200 + content-type json (e.g. proxy)
+      const contentType = response.headers["content-type"] || "";
+      if (contentType.includes("application/json")) {
+        // Parse the JSON to surface backend error messages
+        const text = await response.data.text?.() ?? "";
+        const maybeJson = text ? JSON.parse(text) : {};
+        const msg = maybeJson?.message || "Analysis failed";
+        throw new Error(msg);
+      }
+
+      // Unzip the blob
+      const zip = await JSZip.loadAsync(response.data);
+
+      // Heuristics to find analysis and processed video
+      const analysisEntry =
+        zip.file(/(^|\/)analysis\.json$/i)[0] ||
+        zip.file(/(^|\/)transcript.*\.json$/i)[0];
+
+      const videoEntry =
+        zip.file(/\.(mp4|webm|mov|mkv|avi)$/i)[0] ||
+        zip.file(/(^|\/)processed.*\.(mp4|webm|mov|mkv|avi)$/i)[0];
+
+      if (!analysisEntry && !videoEntry) {
+        throw new Error("ZIP did not contain analysis or video");
+      }
+
+      // Load analysis JSON (optional)
+      if (analysisEntry) {
+        const analysisText = await analysisEntry.async("text");
+        try {
+          const analysisJson = JSON.parse(analysisText);
+          setTranscriptAnalysis(analysisJson);
+        } catch {
+          // Keep raw text if JSON parsing fails
+          setTranscriptAnalysis({ raw: analysisText });
+        }
+      }
+
+      // Load processed video (optional)
+      if (videoEntry) {
+        const videoBlob = await videoEntry.async("blob");
+        const url = URL.createObjectURL(videoBlob);
+        setProcessedVideoUrl(url);
+      }
+
+      dispatch(setBannerThunk("Analysis complete", "success"));
+    } catch {
+      dispatch(setBannerThunk("Analysis failed. Please try again.", "error"));
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [selectedFile, videoId, dispatch]);
+
   useEffect(() => {
     if (mediaStream && videoRef.current) {
       videoRef.current.srcObject = mediaStream;
@@ -149,6 +237,15 @@ function VideoUpload() {
   }, [mediaStream]);
 
   useEffect(() => () => stopMediaStream(), [stopMediaStream]);
+
+  // Cleanup processed video URL on unmount
+  useEffect(() => {
+    return () => {
+      if (processedVideoUrl) {
+        URL.revokeObjectURL(processedVideoUrl);
+      }
+    };
+  }, [processedVideoUrl]);
 
   return (
     <div className="flex flex-col items-center">
@@ -206,7 +303,7 @@ function VideoUpload() {
               <video
                 controls
                 className="w-full min-w-[170] max-h-96 shadow-md"
-                src={URL.createObjectURL(selectedFile)}
+                src={processedVideoUrl ?? URL.createObjectURL(selectedFile)}
               />
               <div
                 onClick={resetVideoState}
@@ -224,8 +321,12 @@ function VideoUpload() {
               )}
             </div>
             <div className="w-120 flex justify-center mt-4 px-10">
-              <button className="bg-white border-2 border-gray-300 hover:border-[var(--pink-500)] text-[var(--pink-500)] font-bold py-2 w-full rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl z-10">
-                Run Analysis
+              <button
+                onClick={handleRunAnalysis}
+                disabled={analyzing}
+                className="bg-white border-2 border-gray-300 hover:border-[var(--pink-500)] disabled:opacity-50 text-[var(--pink-500)] font-bold py-2 w-full rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl z-10"
+              >
+                {analyzing ? "Analyzing..." : "Run Analysis"}
               </button>
             </div>
           </div>

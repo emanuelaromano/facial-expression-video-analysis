@@ -10,5 +10,10 @@ services:
       - .:/app
     command: >
       uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
+      - FACE_MESH_EVERY=2
+      - EMOTION_EVERY=10
+      - NUM_WORKERS=4

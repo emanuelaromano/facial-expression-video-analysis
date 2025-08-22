@@ -15,13 +15,14 @@ from threading import Lock
 from typing import Optional
 from openai import OpenAI
 from zipfile import ZipFile, ZIP_DEFLATED
+from fractions import Fraction
+import json
 
-router = APIRouter(prefix="/video")
+router = APIRouter()
 client = OpenAI()
-
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# Logging setup
 logger = logging.getLogger("hireview")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -34,16 +35,25 @@ logger.propagate = False
 # Video processing globals
 ########################################################
 
-FACE_MESH_EVERY = 2
-EMOTION_EVERY = 10
-DETECTOR_BACKEND = "opencv"
-NUM_WORKERS = 4 
+FACE_MESH_EVERY = int(os.getenv("FACE_MESH_EVERY", "2"))
+EMOTION_EVERY   = int(os.getenv("EMOTION_EVERY", "10"))
+NUM_WORKERS     = int(os.getenv("NUM_WORKERS", "4"))
+
+# Building the face mesh
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh_model = mp_face_mesh.FaceMesh(static_image_mode=True, refine_landmarks=True)
 mesh_lock = Lock()
+
+# Face detection for emotion analysis
+mp_fd = mp.solutions.face_detection
+face_det = mp_fd.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+fd_lock = Lock()
+
+# Emotion analysis
 emotion_processor = AutoImageProcessor.from_pretrained("mo-thecreator/vit-Facial-Expression-Recognition")
 emotion_model = AutoModelForImageClassification.from_pretrained("mo-thecreator/vit-Facial-Expression-Recognition").eval()
 EMOTION_ID2LABEL = emotion_model.config.id2label
+
 
 ########################################################
 # API endpoints
@@ -54,7 +64,7 @@ def analyze_video(
     background_tasks: BackgroundTasks,
     uuid: str = Form(...),
     original_video: UploadFile = File(...),
-    job_description: str = Form("Data Engineer"),
+    job_description: Optional[str] = Form("Data Engineer"),
 ) -> FileResponse:
     temp_dir = f"temp/{uuid}"
     temp_og_video_path = os.path.join(temp_dir, "video.mp4")
@@ -74,7 +84,7 @@ def analyze_video(
 
         # Save video and extract info
         save_original_video(original_video, temp_og_video_path)
-        fps = get_fps(temp_og_video_path)
+        fps_num, fps_den = get_fps_fraction(temp_og_video_path)
         audio_path = extract_audio_ffmpeg(temp_og_video_path, temp_audio_path)
         if not audio_path:
             logger.warning("Audio extraction failed - video will be silent")
@@ -126,11 +136,15 @@ def analyze_video(
                 "emotion": label,
                 "confidence": conf,
             }
-            rebuild_frame(i, temp_frames_dir, temp_processed_dir, final_expression)
+            rebuild_frame(i, temp_frames_dir, temp_processed_dir, num_frames, final_expression)
 
         # Rebuild video
         rebuilt_video_path = rebuild_video_ffmpeg(
-            temp_processed_dir, audio_path, temp_rebuilt_video_path, fps
+            temp_processed_dir,
+            audio_path,
+            temp_rebuilt_video_path,
+            fps_num,
+            fps_den,
         )
         if not os.path.exists(rebuilt_video_path):
             logger.error("rebuilt video not found at %s", rebuilt_video_path)
@@ -184,7 +198,7 @@ def split_video_into_frames(video_path: str, frames_dir: str) -> int:
     return count
 
 
-def analyze_frame(frame_path: str, frame_index: int) -> dict | None:
+def analyze_frame(frame_path: str, frame_index: int) -> dict:
     try:
         face_mesh, emotion, confidence = None, None, None
         if frame_index % FACE_MESH_EVERY == 0:
@@ -198,12 +212,25 @@ def analyze_frame(frame_path: str, frame_index: int) -> dict | None:
         }
     except Exception as e:
         logger.warning(f"Unexpected error analyzing frame {frame_index}: {e}")
-        # Return empty dict instead of None to avoid KeyError in rebuild loop
         return {
             "face_mesh": None,
             "emotion": None,
             "confidence": None
         }
+
+def detect_face_bbox(bgr):
+    # Implement face detection using MediaPipe to improve emotion analysis
+    height, width = bgr.shape[:2]
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    with fd_lock:
+        res = face_det.process(rgb)
+    if not res or not res.detections: return None
+    d = max(res.detections, key=lambda d: d.location_data.relative_bounding_box.width*d.location_data.relative_bounding_box.height)
+    rb = d.location_data.relative_bounding_box
+    x1 = max(0, int(rb.xmin * width)); y1 = max(0, int(rb.ymin * height))
+    x2 = min(width, int((rb.xmin + rb.width) * width)); y2 = min(height, int((rb.ymin + rb.height) * height))
+    mx = int(0.1 * (x2 - x1)); my = int(0.1 * (y2 - y1))
+    return max(0, x1-mx), max(0, y1-my), min(width, x2+mx), min(height, y2+my)
 
 
 def emotion_analysis(frame_path: str, frame_index: int):
@@ -211,7 +238,9 @@ def emotion_analysis(frame_path: str, frame_index: int):
     if bgr is None:
         logger.warning(f"Frame {frame_index} could not be read for emotion analysis.")
         return None, None
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    bbox = detect_face_bbox(bgr)
+    face = bgr if not bbox else bgr[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+    rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
     try:
         inputs = emotion_processor(images=rgb, return_tensors="pt")
         with torch.no_grad():
@@ -261,9 +290,10 @@ def rebuild_frame(
     frame_index: int,
     temp_frames_dir: str,
     temp_processed_dir: str,
+    num_frames: int,
     expression: Optional[dict] = None
 ) -> None:
-    logger.info(f"Rebuilding frame {frame_index}")
+    logger.info(f"Rebuilding frame {frame_index}/{num_frames}")
     frame_path = os.path.join(temp_frames_dir, f"{frame_index}.jpg")
     frame_image = cv2.imread(frame_path)
     if frame_image is None:
@@ -346,13 +376,24 @@ def rebuild_frame(
 
     os.makedirs(temp_processed_dir, exist_ok=True)
     out_path = os.path.join(temp_processed_dir, f"{frame_index}.jpg")
-    cv2.imwrite(out_path, frame_image)
+    cv2.imwrite(out_path, frame_image, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
-def get_fps(video_path: str) -> float:
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 0
-    cap.release()
-    return fps if fps > 0 else 25.0
+def get_fps_fraction(video_path: str) -> tuple[int, int]:
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=avg_frame_rate",
+        "-of", "json", video_path
+    ]
+    try:
+        out = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        info = json.loads(out.stdout.decode("utf-8"))
+        rate = info["streams"][0]["avg_frame_rate"]
+        frac = Fraction(rate)
+        return frac.numerator, frac.denominator
+    except Exception:
+        # Safe default if probing fails
+        return 30000, 1001
 
 def extract_audio_ffmpeg(input_video: str, output_audio: str) -> Optional[str]:
     os.makedirs(os.path.dirname(output_audio), exist_ok=True)
@@ -392,33 +433,39 @@ def extract_audio_ffmpeg(input_video: str, output_audio: str) -> Optional[str]:
     except subprocess.CalledProcessError as e:
         return None
 
-def rebuild_video_ffmpeg(frames_dir: str, audio_path: Optional[str], output_path: str, fps: float) -> str:
+def rebuild_video_ffmpeg(frames_dir: str, audio_path: Optional[str], output_path: str,
+                         fps_num: int, fps_den: int, keep_all_frames: bool = True) -> str:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    fps_str = f"{fps_num}/{fps_den}"
 
     base = [
         "ffmpeg", "-y",
         "-start_number", "0",
-        "-framerate", str(int(round(fps))),
+        "-framerate", fps_str,          # exact input rate for the image sequence
         "-i", os.path.join(frames_dir, "%d.jpg"),
     ]
 
     if audio_path and os.path.exists(audio_path):
         cmd = base + [
             "-i", audio_path,
-            "-map", "0:v:0", "-map", "1:a:0",  
+            "-map", "0:v:0", "-map", "1:a:0",
             "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-r", str(int(round(fps))),
-            "-c:a", "copy",                    
-            "-shortest",
-            output_path
+            "-vsync", "cfr",
+            "-r", fps_str,
+            "-c:a", "copy",
         ]
+        if not keep_all_frames:
+            cmd += ["-shortest"]
+        cmd += [output_path]
     else:
         cmd = base + [
             "-map", "0:v:0",
             "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-r", str(int(round(fps))),
+            "-vsync", "cfr",
+            "-r", fps_str,
             output_path
         ]
+
     try:
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
