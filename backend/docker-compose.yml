@@ -1,13 +1,14 @@
-version: '3.8'
+version: "3.9"
 
 services:
-  deepface-app:
+  app:
     build: .
-    container_name: deepface_app
+    container_name: hireview-backend
+    ports:
+      - "8000:8000"
     volumes:
       - .:/app
-    ports:
-      - "3000:3000"
+    command: >
+      uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       - PYTHONUNBUFFERED=1
-    command: python streamlit_app.py

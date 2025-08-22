@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.mp4
+*.mov
+*.avi
+.env
+.git
+.idea
+.vscode
+__init__.py
+*.log
+.DS_Storev

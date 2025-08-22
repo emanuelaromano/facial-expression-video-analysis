@@ -1,56 +1,368 @@
 import os
+import shutil
+import cv2
+import logging
+import subprocess
 from dotenv import load_dotenv
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile, Form, BackgroundTasks, HTTPException
+from fastapi.responses import FileResponse
+from http import HTTPStatus
+from deepface import DeepFace
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import mediapipe as mp
+from threading import Lock
+from typing import Optional
 
 router = APIRouter(prefix="/video")
 
 load_dotenv()
-
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-##############################
-# Facial analysis functions
-##############################
+logger = logging.getLogger("hireview")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
-def split_video_into_frames(video_path: str, uuid: str) -> str:
-    # TODO: Split the video into frames and save into a temp directory with uuid
-    # Return the path to the temp directory
-    pass
+FACE_MESH_EVERY = 2
+EMOTION_EVERY = 10
+DETECTOR_BACKEND = "opencv"
+NUM_WORKERS = 4 
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh_model = mp_face_mesh.FaceMesh(static_image_mode=True, refine_landmarks=True)
+mesh_lock = Lock()
 
-def facial_expression_analysis(frame: str) -> str:
-    # TODO: Use DeepFace to analyze the facial expression in the frame
-    pass
+@router.post("/analyze", status_code=HTTPStatus.OK)
+def analyze_video(
+    background_tasks: BackgroundTasks,
+    uuid: str = Form(...),
+    original_video: UploadFile = File(...),
+) -> FileResponse:
+    temp_dir = f"temp/{uuid}"
+    temp_og_video_path = os.path.join(temp_dir, "video.mp4")
+    temp_frames_dir = os.path.join(temp_dir, "frames")
+    temp_processed_dir = os.path.join(temp_dir, "processed")
+    temp_audio_path = os.path.join(temp_dir, "audio.m4a")
+    temp_rebuilt_video_path = os.path.join(temp_dir, "rebuilt_video.mp4")
+    logger.info(f"Analyzing video {uuid}")
 
-def face_mesh_analysis(frame: str) -> str:
-    # TODO: Use MediaPipe to analyze the face mesh in the frame
-    pass
+    try:
+        # Create temp folders
+        os.makedirs(temp_frames_dir, exist_ok=True)
+        os.makedirs(temp_processed_dir, exist_ok=True)
 
-def overall_frame_analysis(original_frame: str, facial_expression: str, face_mesh: str) -> str:
-    # TODO: Return the processed frame, with the facial expression and face mesh
-    pass
+        # Save video and extract info
+        save_original_video(original_video, temp_og_video_path)
+        fps = get_fps(temp_og_video_path)
+        audio_path = extract_audio_ffmpeg(temp_og_video_path, temp_audio_path)
+        if not audio_path:
+            logger.warning("Audio extraction failed - video will be silent")
+        num_frames = split_video_into_frames(temp_og_video_path, temp_frames_dir)
 
-def add_audio_to_video(processed_frames: list[str], audio_path: str) -> str:
-    # TODO: Add the audio to the processed frames and return the video with the audio
-    pass
+        expressions = {}
+
+        # Analyze only needed frames
+        needed_idxs = sorted(
+            set(range(0, num_frames, FACE_MESH_EVERY)) |
+            set(range(0, num_frames, EMOTION_EVERY))
+        )
+
+        with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+            futures = {
+                executor.submit(analyze_frame, os.path.join(temp_frames_dir, f"{i}.jpg"), i): i
+                for i in needed_idxs
+            }
+
+            for future in as_completed(futures):
+                idx = futures[future]
+                result = future.result()
+                expressions[str(idx)] = result or {}
+                logger.info(f"Analyzed frame {idx}/{num_frames}")
+
+        # Rebuild frames using most recent analyzed indices
+        for i in range(num_frames):
+            mesh_idx = (i // FACE_MESH_EVERY) * FACE_MESH_EVERY
+            emo_idx = (i // EMOTION_EVERY) * EMOTION_EVERY
+            mesh_idx = min(mesh_idx, num_frames - 1)
+            emo_idx = min(emo_idx,  num_frames - 1)
+
+            mesh_expression = expressions.get(str(mesh_idx), {}) or {}
+            emotion_expression = expressions.get(str(emo_idx), {}) or {}
+
+            final_expression = {
+                "face_mesh": mesh_expression.get("face_mesh"),
+                "emotion": emotion_expression.get("emotion"),
+                "confidence": emotion_expression.get("confidence"),
+            }
+            rebuild_frame(i, temp_frames_dir, temp_processed_dir, final_expression)
+
+        rebuilt_video_path = rebuild_video_ffmpeg(temp_processed_dir, audio_path, temp_rebuilt_video_path, fps)
+
+        if not os.path.exists(rebuilt_video_path):
+            logger.error("rebuilt video not found at %s", rebuilt_video_path)
+            raise HTTPException(status_code=500, detail="Failed to build output video")
+
+        # Schedule cleanup AFTER the response is sent
+        background_tasks.add_task(shutil.rmtree, temp_dir, True)
+
+        # Return the mp4 file
+        return FileResponse(
+            path=rebuilt_video_path,
+            media_type="video/mp4",
+            filename=f"{uuid}.mp4"
+        )
+    except Exception as e:
+        logger.exception("unexpected error in analyze_video")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+
+
+
+def save_original_video(original_video: UploadFile, path: str) -> None:
+    with open(path, "wb") as f:
+        f.write(original_video.file.read())
+
+
+def split_video_into_frames(video_path: str, frames_dir: str) -> int:
+    video = cv2.VideoCapture(video_path)
+    count = 0
+    try:
+        while True:
+            ret, frame = video.read()
+            if not ret:
+                break
+            frame_path = os.path.join(frames_dir, f"{count}.jpg")
+            cv2.imwrite(frame_path, frame)
+            count += 1
+    finally:
+        video.release()
+    return count
+
+
+def analyze_frame(frame_path: str, frame_index: int) -> dict | None:
+    try:
+        face_mesh, emotion, confidence = None, None, None
+        if frame_index % FACE_MESH_EVERY == 0:
+           face_mesh = face_mesh_analysis(frame_path, frame_index)
+        if frame_index % EMOTION_EVERY == 0:
+            emotion, confidence = emotion_analysis(frame_path, frame_index)
+        return {
+            "face_mesh": face_mesh,
+            "emotion": emotion,
+            "confidence": confidence
+        }
+    except Exception as e:
+        logger.warning(f"Error analyzing frame {frame_index}: {e}")
+    return {
+        "face_mesh": None,
+        "emotion": None,
+        "confidence": None
+    }
+
+
+def emotion_analysis(frame_path: str, frame_index: int):
+    frame_image = cv2.imread(frame_path)
+    if frame_image is None:
+        logger.warning(f"Frame {frame_index} could not be read for emotion analysis.")
+        return None, None
+    result = DeepFace.analyze(
+        frame_image,
+        actions=['emotion'],
+        enforce_detection=False,
+        detector_backend=DETECTOR_BACKEND
+    )[0]
+    emotion_scores = result.get("emotion", {})
+    if emotion_scores:
+        top_emotion = max(emotion_scores, key=emotion_scores.get)
+        return top_emotion, round(float(emotion_scores[top_emotion]), 2)
+    return None, None
+
+def face_mesh_analysis(frame_path: str, frame_index: int):
+    frame_bgr = cv2.imread(frame_path)
+    if frame_bgr is None:
+        logger.warning(f"Frame {frame_index} could not be read for face mesh.")
+        return None
+
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+    try:
+        with mesh_lock:
+            results = face_mesh_model.process(rgb)
+    except Exception as e:
+        logger.warning(f"FaceMesh processing failed for frame {frame_index}: {e}")
+        return None
+
+    if not results or not results.multi_face_landmarks:
+        return None
+
+    faces = []
+    for face_landmarks in results.multi_face_landmarks:
+        points = [
+            {
+                "x": float(round(lm.x, 5)),
+                "y": float(round(lm.y, 5)),
+                "z": float(round(lm.z, 5)),
+            }
+            for lm in face_landmarks.landmark
+        ]
+        faces.append(points)
+    return faces
+
+
+def rebuild_frame(frame_index: int, temp_frames_dir: str, temp_processed_dir: str, expression: Optional[dict] = None) -> None:
+    frame_path = os.path.join(temp_frames_dir, f"{frame_index}.jpg")
+    frame_image = cv2.imread(frame_path)
+    height, width = frame_image.shape[:2]
+
+    faces = None
+    if isinstance(expression, dict):
+        faces = expression.get("face_mesh")
+
+    if faces:
+        for face in faces:
+            for pt in face:
+                x = int(pt["x"] * width)
+                y = int(pt["y"] * height)
+                cv2.circle(frame_image, (x, y), 1, (0, 255, 0), thickness=-1, lineType=cv2.LINE_AA)
+
+    label_lines = []
+    if isinstance(expression, dict):
+        emotion = expression.get("emotion")
+        confidence = expression.get("confidence")
+        if emotion is not None and confidence is not None:
+            label_lines.append(str(emotion).upper())
+            label_lines.append(f"Conf: {float(confidence):.2f}")
+        elif faces:
+            label_lines.append("MESH")
+
+    if label_lines:
+        padding = 8
+        line_gap = 18
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        thickness = 1
+
+        max_text_w = 0
+        for line in label_lines:
+            (text_width, _), _ = cv2.getTextSize(line, font, font_scale, thickness)
+            max_text_w = max(max_text_w, text_width)
+
+        box_w = max_text_w + 2 * padding
+        box_h = line_gap * len(label_lines) + 2 * padding
+
+        top_left = (10, 10)
+        bottom_right = (10 + box_w, 10 + box_h)
+        cv2.rectangle(frame_image, top_left, bottom_right, (30, 30, 30), thickness=-1)
+
+        # Put text
+        y = 10 + padding + 12
+        for line in label_lines:
+            cv2.putText(frame_image, line, (10 + padding, y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+            y += line_gap
+
+    os.makedirs(temp_processed_dir, exist_ok=True)
+    out_path = os.path.join(temp_processed_dir, f"{frame_index}.jpg")
+    cv2.imwrite(out_path, frame_image)
+
+def get_fps(video_path: str) -> float:
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 0
+    cap.release()
+    return fps if fps > 0 else 25.0
+
+def extract_audio_ffmpeg(input_video: str, output_audio: str) -> Optional[str]:
+    os.makedirs(os.path.dirname(output_audio), exist_ok=True)
+
+    # Check for audio stream
+    probe_cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "a:0",
+        "-show_entries", "stream=index",
+        "-of", "csv=p=0", input_video
+    ]
+    try:
+        subprocess.run(probe_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError:
+        logger.warning(f"No audio stream found in: {input_video}")
+        return None
+
+    ext = os.path.splitext(output_audio)[1].lower()
+    if ext == ".mp3":
+        acodec = "libmp3lame"
+    else:
+        acodec = "aac"
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", input_video,
+        "-map", "0:a:0",
+        "-vn",
+        "-c:a", acodec,
+        output_audio
+    ]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if os.path.exists(output_audio) and os.path.getsize(output_audio) > 1024:  # at least 1KB
+            logger.info(f"Audio extracted: {output_audio} ({os.path.getsize(output_audio)} bytes)")
+            return output_audio
+        return None
+    except subprocess.CalledProcessError as e:
+        return None
+
+def rebuild_video_ffmpeg(frames_dir: str, audio_path: Optional[str], output_path: str, fps: float) -> str:
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    base = [
+        "ffmpeg", "-y",
+        "-start_number", "0",
+        "-framerate", str(int(round(fps))),
+        "-i", os.path.join(frames_dir, "%d.jpg"),
+    ]
+
+    if audio_path and os.path.exists(audio_path):
+        cmd = base + [
+            "-i", audio_path,
+            "-map", "0:v:0", "-map", "1:a:0",  
+            "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-r", str(int(round(fps))),
+            "-c:a", "copy",                    
+            "-shortest",
+            output_path
+        ]
+    else:
+        cmd = base + [
+            "-map", "0:v:0",
+            "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-r", str(int(round(fps))),
+            output_path
+        ]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise RuntimeError(f"Output video not created: {output_path}")
+        return output_path
+    except subprocess.CalledProcessError as e:
+        logger.error(f"ffmpeg video rebuild failed: {e.stderr.decode(errors='ignore')[:400]}")
+        raise
+
 
 #################################
 # Transcript analysis functions
 #################################
 
+def extract_audio(video_path: str) -> str:
+    # TODO: Extract the audio from the video and return the audio path
+    # This function is kept for future transcript analysis features
+    pass
+
 def audio_transcription(video_path: str) -> str:
     # TODO: Transcribe the audio of the video using OpenAI Whisper
+    # This function is kept for future transcript analysis features
     pass
 
 def analyze_transcription(transcription: str) -> str:
     # TODO: Analyze the transcription using OpenAI and return the analysis.
     # The LLM should act as a career coach, giving feedback to the candidate based on the quality of the content.
+    # This function is kept for future transcript analysis features
     pass
 
-#################################
-# Video processing functions
-#################################
-
-@router.post("/analyze")
-def analyze_video(uuid: str, original_video: str) -> str:
-    # TODO: Get the original video, split it into frames, analyze the frames, add the audio to the frames, analyze the audio, and return the processed video, with the analysis
-    pass

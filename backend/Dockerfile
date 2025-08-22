@@ -1,29 +1,50 @@
-FROM python:3.10-slim-bullseye
+FROM python:3.11-slim-bullseye
 
-# Fix HTTPS source issue
+# Fix HTTPS source issue and add retry logic
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list
 
-# Install system packages
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
-    libgomp1 \
-    ffmpeg \
-    tesseract-ocr \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
-    libv4l-dev \
-    libxvidcore-dev \
-    libx264-dev \
-    libjpeg-dev \
-    libpng-dev \
-    libtiff-dev \
-    git \
+# Install system packages with retry logic and better error handling
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install media libraries separately
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libsm6 \
+        libxext6 \
+        libxrender1 \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install video/audio libraries
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libavcodec-dev \
+        libavformat-dev \
+        libswscale-dev \
+        libv4l-dev \
+        libxvidcore-dev \
+        libx264-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install image libraries
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libjpeg-dev \
+        libpng-dev \
+        libtiff-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OCR tools
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -33,10 +54,10 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies first
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 # Now copy app code
 COPY . .
 
 # Run app
-CMD ["sh", "-c", "streamlit run streamlit_app.py --server.port=3000 --server.address=0.0.0.0"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
