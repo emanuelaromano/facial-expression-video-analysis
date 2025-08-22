@@ -8,6 +8,8 @@ from fastapi import APIRouter, File, UploadFile, Form, BackgroundTasks, HTTPExce
 from fastapi.responses import FileResponse
 from http import HTTPStatus
 from deepface import DeepFace
+from transformers import AutoImageProcessor, AutoModelForImageClassification  # Hugging Face
+import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import mediapipe as mp
 from threading import Lock
@@ -26,6 +28,10 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 logger.propagate = False
 
+########################################################
+# Video processing globals
+########################################################
+
 FACE_MESH_EVERY = 2
 EMOTION_EVERY = 10
 DETECTOR_BACKEND = "opencv"
@@ -33,6 +39,13 @@ NUM_WORKERS = 4
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh_model = mp_face_mesh.FaceMesh(static_image_mode=True, refine_landmarks=True)
 mesh_lock = Lock()
+emotion_processor = AutoImageProcessor.from_pretrained("mo-thecreator/vit-Facial-Expression-Recognition")
+emotion_model = AutoModelForImageClassification.from_pretrained("mo-thecreator/vit-Facial-Expression-Recognition").eval()
+EMOTION_ID2LABEL = emotion_model.config.id2label
+
+########################################################
+# API endpoints
+########################################################
 
 @router.post("/analyze", status_code=HTTPStatus.OK)
 def analyze_video(
@@ -82,6 +95,11 @@ def analyze_video(
                 logger.info(f"Analyzed frame {idx}/{num_frames}")
 
         # Rebuild frames using most recent analyzed indices
+        # Exponential smoothing for emotion confidence to reduce flicker
+        alpha = 0.4
+        last_label = None
+        last_conf = None
+
         for i in range(num_frames):
             mesh_idx = (i // FACE_MESH_EVERY) * FACE_MESH_EVERY
             emo_idx = (i // EMOTION_EVERY) * EMOTION_EVERY
@@ -91,10 +109,20 @@ def analyze_video(
             mesh_expression = expressions.get(str(mesh_idx), {}) or {}
             emotion_expression = expressions.get(str(emo_idx), {}) or {}
 
+            label = emotion_expression.get("emotion")
+            conf = emotion_expression.get("confidence")
+
+            if label is None:
+                label = last_label
+            if isinstance(conf, (int, float)) and isinstance(last_conf, (int, float)):
+                conf = alpha * conf + (1 - alpha) * last_conf
+            last_label = label
+            last_conf = conf
+
             final_expression = {
                 "face_mesh": mesh_expression.get("face_mesh"),
-                "emotion": emotion_expression.get("emotion"),
-                "confidence": emotion_expression.get("confidence"),
+                "emotion": label,
+                "confidence": conf,
             }
             rebuild_frame(i, temp_frames_dir, temp_processed_dir, final_expression)
 
@@ -117,7 +145,9 @@ def analyze_video(
         logger.exception("unexpected error in analyze_video")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
 
-
+########################################################
+# Video processing functions
+########################################################
 
 def save_original_video(original_video: UploadFile, path: str) -> None:
     with open(path, "wb") as f:
@@ -163,35 +193,23 @@ def analyze_frame(frame_path: str, frame_index: int) -> dict | None:
 
 
 def emotion_analysis(frame_path: str, frame_index: int):
-    frame_image = cv2.imread(frame_path)
-    if frame_image is None:
+    bgr = cv2.imread(frame_path)
+    if bgr is None:
         logger.warning(f"Frame {frame_index} could not be read for emotion analysis.")
         return None, None
-    detectors = ["opencv", "retinaface", "mtcnn", "dlib", "ssd", "yolo"]
-    detectors.remove(DETECTOR_BACKEND)
-    result = DeepFace.analyze(
-        frame_image,
-        actions=['emotion'],
-        enforce_detection=False,
-        detector_backend=DETECTOR_BACKEND
-    )[0]
-    while result is None and detectors:
-        detector = detectors.pop(0)
-        logger.info(f"Trying emotion analysis with {detector} for frame {frame_index}")
-        result = DeepFace.analyze(
-            frame_image,
-            actions=['emotion'],
-            enforce_detection=False,
-            detector_backend=detector
-        )[0]
-    if result is None:
-        logger.warning(f"All emotion analysis attempts failed for frame {frame_index}")
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    try:
+        inputs = emotion_processor(images=rgb, return_tensors="pt")
+        with torch.no_grad():
+            logits = emotion_model(**inputs).logits
+            probs = torch.softmax(logits, dim=-1)[0]
+        idx = int(torch.argmax(probs).item())
+        label = EMOTION_ID2LABEL.get(idx, str(idx)) if EMOTION_ID2LABEL else str(idx)
+        conf = float(probs[idx].item())
+        return label, conf
+    except Exception as e:
+        logger.warning(f"ViT FER analysis failed for frame {frame_index}: {e}")
         return None, None
-    emotion_scores = result.get("emotion", {})
-    if emotion_scores:
-        top_emotion = max(emotion_scores, key=emotion_scores.get)
-        return top_emotion, round(float(emotion_scores[top_emotion]), 2)
-    return None, None
 
 def face_mesh_analysis(frame_path: str, frame_index: int):
     frame_bgr = cv2.imread(frame_path)
