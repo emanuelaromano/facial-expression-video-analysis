@@ -490,21 +490,25 @@ def transcribe_audio(audio_path: str) -> str:
 
 def analyze_spoken_content(audio_path: str, job_description: str, analysis_path: str) -> None:
     spoken_content_analysis = "No audio stream found."
-    if audio_path:
-        transcript = transcribe_audio(audio_path).strip()
-        if not transcript:
-            spoken_content_analysis = "No speech detected."
-        else:
-            resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system",
-                    "content": f"You are a career coach. Analyze the following interview answer and give concise, actionable feedback. The job description is: {job_description}"},
-                    {"role": "user", "content": transcript},
-                ],
-                temperature=0.2,
-            )
-            spoken_content_analysis = resp.choices[0].message.content
+    try:
+        if audio_path:
+            transcript = transcribe_audio(audio_path).strip()
+            if not transcript:
+                spoken_content_analysis = "No speech detected."
+            else:
+                resp = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system",
+                        "content": f"You are a career coach. Analyze the following interview answer and give concise, actionable feedback. The job description is: {job_description}"},
+                        {"role": "user", "content": transcript},
+                    ],
+                    temperature=0.2,
+                )
+                spoken_content_analysis = resp.choices[0].message.content
+    except Exception as e:
+        logger.warning(f"Spoken content analysis skipped: {e}")
+        spoken_content_analysis = "Analysis unavailable."
 
     with open(analysis_path, "w", encoding="utf-8") as f:
         f.write(spoken_content_analysis)

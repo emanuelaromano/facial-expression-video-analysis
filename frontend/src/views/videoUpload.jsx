@@ -5,6 +5,8 @@ import { CircleX, RotateCcw } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import JSZip from "jszip";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 function VideoUpload() {
   const dispatch = useDispatch();
@@ -21,7 +23,10 @@ function VideoUpload() {
   const [transcriptAnalysis, setTranscriptAnalysis] = useState(null);
   const [processedVideoUrl, setProcessedVideoUrl] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const videoId = uuidv4();
+  const videoIdRef = useRef(uuidv4());
+  const videoId = videoIdRef.current;
+  // eslint-disable-next-line no-unused-vars
+  const [progress, setProgress] = useState(50);
 
   const stopMediaStream = useCallback(() => {
     if (mediaStream) {
@@ -151,6 +156,10 @@ function VideoUpload() {
     }
   };
 
+  const handleCancelAnalysis = () => {
+    console.log("Cancel analysis");
+  };
+
   const handleRunAnalysis = useCallback(async () => {
     if (!selectedFile) {
       dispatch(setBannerThunk("Please upload or record a video first", "error"));
@@ -172,59 +181,33 @@ function VideoUpload() {
         responseType: "blob",
       });
 
-      // axios uses status, not response.ok
       if (response.status < 200 || response.status >= 300) {
         throw new Error(`Server returned ${response.status}`);
-      }
-
-      // Some servers may return JSON error with 200 + content-type json (e.g. proxy)
-      const contentType = response.headers["content-type"] || "";
-      if (contentType.includes("application/json")) {
-        // Parse the JSON to surface backend error messages
-        const text = await response.data.text?.() ?? "";
-        const maybeJson = text ? JSON.parse(text) : {};
-        const msg = maybeJson?.message || "Analysis failed";
-        throw new Error(msg);
       }
 
       // Unzip the blob
       const zip = await JSZip.loadAsync(response.data);
 
-      // Heuristics to find analysis and processed video
-      const analysisEntry =
-        zip.file(/(^|\/)analysis\.json$/i)[0] ||
-        zip.file(/(^|\/)transcript.*\.json$/i)[0];
+      const analysisEntry = zip.file("spoken_content_analysis.txt");
+      const videoEntry = zip.file(`${videoId}.mp4`);
 
-      const videoEntry =
-        zip.file(/\.(mp4|webm|mov|mkv|avi)$/i)[0] ||
-        zip.file(/(^|\/)processed.*\.(mp4|webm|mov|mkv|avi)$/i)[0];
-
-      if (!analysisEntry && !videoEntry) {
-        throw new Error("ZIP did not contain analysis or video");
+      if (!analysisEntry || !videoEntry) {
+        throw new Error("ZIP missing analysis or video");
       }
 
-      // Load analysis JSON (optional)
-      if (analysisEntry) {
-        const analysisText = await analysisEntry.async("text");
-        try {
-          const analysisJson = JSON.parse(analysisText);
-          setTranscriptAnalysis(analysisJson);
-        } catch {
-          // Keep raw text if JSON parsing fails
-          setTranscriptAnalysis({ raw: analysisText });
-        }
-      }
+      // Load analysis text
+      const analysisText = await analysisEntry.async("text");
+      setTranscriptAnalysis(analysisText);
 
-      // Load processed video (optional)
-      if (videoEntry) {
-        const videoBlob = await videoEntry.async("blob");
-        const url = URL.createObjectURL(videoBlob);
-        setProcessedVideoUrl(url);
-      }
+      // Load processed video
+      const videoBlob = await videoEntry.async("blob");
+      const url = URL.createObjectURL(videoBlob);
+      setProcessedVideoUrl(url);
 
       dispatch(setBannerThunk("Analysis complete", "success"));
-    } catch {
-      dispatch(setBannerThunk("Analysis failed. Please try again.", "error"));
+    } catch (err) {
+      console.error("Analysis failed:", err);
+      dispatch(setBannerThunk("Analysis failed.", "error"));
     } finally {
       setAnalyzing(false);
     }
@@ -305,13 +288,13 @@ function VideoUpload() {
                 className="w-full min-w-[170] max-h-96 shadow-md"
                 src={processedVideoUrl ?? URL.createObjectURL(selectedFile)}
               />
-              <div
+              {!processedVideoUrl && !analyzing && <div
                 onClick={resetVideoState}
                 className="absolute mt-2 mr-2 top-0 right-0"
               >
                 <CircleX className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1" />
-              </div>
-              {wasRecorded && (
+              </div>}
+              {wasRecorded && !analyzing && !processedVideoUrl && (
                 <div
                   onClick={handleRecordVideo}
                   className="absolute mt-2 mr-2 top-10 right-0"
@@ -320,14 +303,50 @@ function VideoUpload() {
                 </div>
               )}
             </div>
-            <div className="w-120 flex justify-center mt-4 px-10">
-              <button
-                onClick={handleRunAnalysis}
-                disabled={analyzing}
-                className="bg-white border-2 border-gray-300 hover:border-[var(--pink-500)] disabled:opacity-50 text-[var(--pink-500)] font-bold py-2 w-full rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl z-10"
-              >
-                {analyzing ? "Analyzing..." : "Run Analysis"}
-              </button>
+            <div className="w-120 flex flex-col gap-4 justify-center mt-4 px-10">
+              {analyzing && (
+                <div className="flex flex-row gap-2 items-center">
+                <div className="w-full h-2 bg-gray-200 rounded-full">
+                    <div
+                      className="h-full bg-[var(--pink-500)] rounded-full"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-gray-500">{progress}%</p>
+                </div>
+              )}
+              {(!processedVideoUrl && !analyzing) ? (
+                <button
+                  onClick={handleRunAnalysis}
+                  className="bg-white border-2 border-gray-300 hover:border-[var(--pink-500)] disabled:opacity-50 text-[var(--pink-500)] font-bold py-2 w-full rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl z-10"
+                >
+                  Run Analysis
+                </button>
+              ) : analyzing ? (
+                <button
+                  onClick={handleCancelAnalysis}
+                  className="bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 px-6 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
+                >
+                  Cancel
+                </button>
+              ) : null}
+            </div>
+            <div className="w-120 flex flex-col gap-10 justify-center mb-10">
+            {transcriptAnalysis && (
+              <div className="w-120 flex flex-col gap-4 justify-center ">
+                <div className="prose prose-pink max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {transcriptAnalysis}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            )}
+            <button
+                  onClick={resetVideoState}
+                  className="w-120 bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 px-6 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
+                >
+                  Reset
+            </button>
             </div>
           </div>
         )}

@@ -6,8 +6,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
-      '/video': {
-        target: 'http://localhost:8000',
+      "/video": {
+        target: "http://localhost:8000",
         changeOrigin: true,
       },
     },
