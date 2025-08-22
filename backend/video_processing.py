@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, File, UploadFile, Form, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 from http import HTTPStatus
-from deepface import DeepFace
 from transformers import AutoImageProcessor, AutoModelForImageClassification  # Hugging Face
 import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
