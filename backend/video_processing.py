@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, File, UploadFile, Form, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 from http import HTTPStatus
-from transformers import AutoImageProcessor, AutoModelForImageClassification  # Hugging Face
+from transformers import AutoImageProcessor, AutoModelForImageClassification
 import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import mediapipe as mp
@@ -173,8 +173,30 @@ def analyze_video(
             zf.write(rebuilt_video_path, arcname=f"{uuid}.mp4")
             zf.write(analysis_path, arcname="spoken_content_analysis.txt")
 
+        # Validate the ZIP file was created correctly
+        if not os.path.exists(bundle_path):
+            logger.error(f"Bundle file was not created at {bundle_path}")
+            raise HTTPException(status_code=500, detail="Failed to create output bundle")
+        
+        bundle_size = os.path.getsize(bundle_path)
+        if bundle_size == 0:
+            logger.error(f"Bundle file is empty: {bundle_path}")
+            raise HTTPException(status_code=500, detail="Output bundle is empty")
+        
         logger.info(f"Analysis complete for video {uuid}. Bundle created: {bundle_path}")
-        logger.info(f"Bundle size: {os.path.getsize(bundle_path)} bytes")
+        logger.info(f"Bundle size: {bundle_size} bytes")
+        
+        # Verify ZIP file integrity
+        try:
+            with ZipFile(bundle_path, 'r') as test_zip:
+                file_list = test_zip.namelist()
+                logger.info(f"ZIP contents: {file_list}")
+                if f"{uuid}.mp4" not in file_list or "spoken_content_analysis.txt" not in file_list:
+                    logger.error(f"ZIP file missing required contents: {file_list}")
+                    raise HTTPException(status_code=500, detail="Output bundle is corrupted")
+        except Exception as e:
+            logger.error(f"ZIP file validation failed: {e}")
+            raise HTTPException(status_code=500, detail="Output bundle validation failed")
 
         # Cleanup AFTER response is sent
         background_tasks.add_task(delayed_rmtree, temp_dir, 30)

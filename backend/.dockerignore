@@ -12,4 +12,4 @@ __pycache__/
 .vscode
 __init__.py
 *.log
-.DS_Storev
+.DS_Store

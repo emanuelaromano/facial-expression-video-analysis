@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/video": {
-        target: "http://localhost:8080",
+        target: "https://backend-app-101856457372.us-central1.run.app",
         changeOrigin: true,
       },
     },

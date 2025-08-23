@@ -14,6 +14,8 @@ function VideoUpload() {
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
 
+  const BACKEND_URL = "https://backend-app-101856457372.us-central1.run.app";
+
   const [selectedFile, setSelectedFile] = useState(null);
   const [recordVideo, setRecordVideo] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -178,8 +180,11 @@ function VideoUpload() {
       formData.append("original_video", selectedFile);
 
       // Expect a ZIP back (binary)
-      const response = await axios.post(`/video/analyze`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
+      const response = await axios.post(`${BACKEND_URL}/video/analyze`, formData, {
+        headers: { 
+          "Content-Type": "multipart/form-data",
+          "Accept": "application/zip, application/octet-stream"
+        },
         responseType: "blob",
       });
 
