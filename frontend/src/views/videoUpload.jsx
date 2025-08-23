@@ -326,7 +326,14 @@ function VideoUpload() {
               {transcriptAnalysis && (
                 <div className="w-full flex flex-col justify-center ">
                   <div className="prose prose-pink max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({children, ...props}) => (
+                          <p className="mb-4" {...props}>{children}</p>
+                        )
+                      }}
+                    >
                       {transcriptAnalysis}
                     </ReactMarkdown>
                   </div>

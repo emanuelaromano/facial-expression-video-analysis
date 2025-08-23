@@ -59,5 +59,8 @@ RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 # Now copy app code
 COPY . .
 
+# Pre-download the Hugging Face model during build
+RUN python -c "from transformers import AutoImageProcessor, AutoModelForImageClassification; AutoImageProcessor.from_pretrained('mo-thecreator/vit-Facial-Expression-Recognition'); AutoModelForImageClassification.from_pretrained('mo-thecreator/vit-Facial-Expression-Recognition')"
+
 # Run app
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]

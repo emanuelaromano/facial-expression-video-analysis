@@ -77,7 +77,7 @@ def analyze_video(
     temp_rebuilt_video_path = os.path.join(temp_dir, "rebuilt_video.mp4")
     bundle_path = os.path.join(temp_dir, f"{uuid}.zip")
     analysis_path = os.path.join(temp_dir, "spoken_content_analysis.txt")
-
+    expressions_path = os.path.join(temp_dir, "expression_stats.json")
     logger.info(f"Analyzing video {uuid}")
 
     try:
@@ -95,6 +95,7 @@ def analyze_video(
 
         # Analyze only needed frames
         expressions = {}
+        expression_stats = {}
         needed_idxs = sorted(
             set(range(0, num_frames, FACE_MESH_EVERY)) |
             set(range(0, num_frames, EMOTION_EVERY))
@@ -104,6 +105,7 @@ def analyze_video(
         logger.info(f"Face mesh analysis every {FACE_MESH_EVERY} frames, emotion analysis every {EMOTION_EVERY} frames")
 
         with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+            logger.info("Starting frame analysis...")
             futures = {
                 executor.submit(analyze_frame, os.path.join(temp_frames_dir, f"{i}.jpg"), i): i
                 for i in needed_idxs
@@ -132,6 +134,8 @@ def analyze_video(
 
             label = emotion_expression.get("emotion")
             conf  = emotion_expression.get("confidence")
+
+            expression_stats[label] = expression_stats.get(label, 0) + 1
 
             if label is None:
                 label = last_label
@@ -168,10 +172,14 @@ def analyze_video(
         # Spoken-content analysis (guard for missing audio)
         analyze_spoken_content(audio_path, job_description, analysis_path)
 
+        with open(expressions_path, "w") as f:
+            json.dump(expression_stats, f)
+
         # Bundle video + analysis into a ZIP
         with ZipFile(bundle_path, "w", compression=ZIP_DEFLATED) as zf:
             zf.write(rebuilt_video_path, arcname=f"{uuid}.mp4")
             zf.write(analysis_path, arcname="spoken_content_analysis.txt")
+            zf.write(expressions_path, arcname="expression_stats.json")
 
         # Validate the ZIP file was created correctly
         if not os.path.exists(bundle_path):
