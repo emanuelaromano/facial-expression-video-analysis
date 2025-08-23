@@ -287,7 +287,7 @@ function VideoUpload() {
             <div className="mt-4 relative bg-black border-2 border-gray-300 flex justify-center items-center rounded-lg px-6">
               <video
                 controls
-                className="w-full min-w-[170] max-h-96 shadow-md"
+                className="min-w-[170] max-h-96 shadow-md"
                 src={processedVideoUrl ?? URL.createObjectURL(selectedFile)}
               />
               {!processedVideoUrl && !analyzing && (

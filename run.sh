@@ -17,6 +17,10 @@ elif [ "$1" == "-f" ]; then
     cd frontend
     npm run dev
     cd ..
+elif [ "$1" == "-fire" ]; then
+    cd frontend
+    npm run build
+    firebase deploy
 elif [ "$1" == "-b" ]; then
     cd backend
     uvicorn main:app --reload --host 0.0.0.0 --port 8080
