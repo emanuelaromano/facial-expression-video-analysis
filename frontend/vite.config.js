@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/video": {
-        target: "http://localhost:8000",
+        target: "http://localhost:8080",
         changeOrigin: true,
       },
     },

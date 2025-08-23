@@ -19,7 +19,7 @@ elif [ "$1" == "-f" ]; then
     cd ..
 elif [ "$1" == "-b" ]; then
     cd backend
-    uvicorn main:app --reload --host 0.0.0.0 --port 8000
+    uvicorn main:app --reload --host 0.0.0.0 --port 8080
     cd ..
 elif [ "$1" == "-lint" ]; then
     cd frontend

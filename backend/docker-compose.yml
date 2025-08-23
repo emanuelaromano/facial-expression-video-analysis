@@ -5,11 +5,11 @@ services:
     build: .
     container_name: hireview-backend
     ports:
-      - "8000:8000"
+      - "8080:8080"
     volumes:
       - .:/app
     command: >
-      uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      uvicorn main:app --host 0.0.0.0 --port 8080 --reload
     env_file:
       - .env
     environment:

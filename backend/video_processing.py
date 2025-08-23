@@ -31,6 +31,9 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 logger.propagate = False
 
+# Delete the temp folder at startup
+shutil.rmtree("temp", ignore_errors=True)
+
 ########################################################
 # Video processing globals
 ########################################################
@@ -96,19 +99,26 @@ def analyze_video(
             set(range(0, num_frames, FACE_MESH_EVERY)) |
             set(range(0, num_frames, EMOTION_EVERY))
         )
+        
+        logger.info(f"Starting analysis of {len(needed_idxs)} frames out of {num_frames} total frames")
+        logger.info(f"Face mesh analysis every {FACE_MESH_EVERY} frames, emotion analysis every {EMOTION_EVERY} frames")
 
         with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
             futures = {
                 executor.submit(analyze_frame, os.path.join(temp_frames_dir, f"{i}.jpg"), i): i
                 for i in needed_idxs
             }
+            completed = 0
             for future in as_completed(futures):
                 idx = futures[future]
                 result = future.result()
                 expressions[str(idx)] = result or {}
-                logger.info(f"Analyzed frame {idx}/{num_frames}")
+                completed += 1
+                if completed % 10 == 0 or completed == len(needed_idxs):
+                    logger.info(f"Analyzed {completed}/{len(needed_idxs)} frames ({completed/len(needed_idxs)*100:.1f}%)")
 
         # Rebuild frames using most recent analyzed indices
+        logger.info(f"Starting frame rebuilding process for {num_frames} frames...")
         alpha = 0.4
         last_label = None
         last_conf = None
@@ -138,6 +148,8 @@ def analyze_video(
             }
             rebuild_frame(i, temp_frames_dir, temp_processed_dir, num_frames, final_expression)
 
+        logger.info(f"Frame rebuilding completed. Starting video reconstruction...")
+        
         # Rebuild video
         rebuilt_video_path = rebuild_video_ffmpeg(
             temp_processed_dir,
@@ -149,6 +161,9 @@ def analyze_video(
         if not os.path.exists(rebuilt_video_path):
             logger.error("rebuilt video not found at %s", rebuilt_video_path)
             raise HTTPException(status_code=500, detail="Failed to build output video")
+        
+        logger.info(f"Video reconstruction completed successfully: {rebuilt_video_path}")
+        logger.info(f"Output video size: {os.path.getsize(rebuilt_video_path)} bytes")
 
         # Spoken-content analysis (guard for missing audio)
         analyze_spoken_content(audio_path, job_description, analysis_path)
@@ -157,6 +172,9 @@ def analyze_video(
         with ZipFile(bundle_path, "w", compression=ZIP_DEFLATED) as zf:
             zf.write(rebuilt_video_path, arcname=f"{uuid}.mp4")
             zf.write(analysis_path, arcname="spoken_content_analysis.txt")
+
+        logger.info(f"Analysis complete for video {uuid}. Bundle created: {bundle_path}")
+        logger.info(f"Bundle size: {os.path.getsize(bundle_path)} bytes")
 
         # Cleanup AFTER response is sent
         background_tasks.add_task(delayed_rmtree, temp_dir, 30)
@@ -293,10 +311,14 @@ def rebuild_frame(
     num_frames: int,
     expression: Optional[dict] = None
 ) -> None:
-    logger.info(f"Rebuilding frame {frame_index}/{num_frames}")
+    # Only log every 10th frame to reduce log noise, but always log the last frame
+    if frame_index % 10 == 0 or frame_index == num_frames - 1:
+        logger.info(f"Rebuilding frame {frame_index + 1}/{num_frames}")
+    
     frame_path = os.path.join(temp_frames_dir, f"{frame_index}.jpg")
     frame_image = cv2.imread(frame_path)
     if frame_image is None:
+        logger.warning(f"Could not read frame {frame_index} from {frame_path}")
         return
 
     height, width = frame_image.shape[:2]
@@ -376,7 +398,13 @@ def rebuild_frame(
 
     os.makedirs(temp_processed_dir, exist_ok=True)
     out_path = os.path.join(temp_processed_dir, f"{frame_index}.jpg")
-    cv2.imwrite(out_path, frame_image, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    
+    try:
+        cv2.imwrite(out_path, frame_image, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+            logger.error(f"Failed to write frame {frame_index} to {out_path}")
+    except Exception as e:
+        logger.error(f"Error writing frame {frame_index}: {e}")
 
 def get_fps_fraction(video_path: str) -> tuple[int, int]:
     cmd = [
