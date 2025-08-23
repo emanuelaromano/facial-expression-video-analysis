@@ -7,14 +7,13 @@ import axios from "axios";
 import JSZip from "jszip";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { API_URL } from "../../api";
 
 function VideoUpload() {
   const dispatch = useDispatch();
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
-
-  const BACKEND_URL = "https://backend-app-101856457372.us-central1.run.app";
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [recordVideo, setRecordVideo] = useState(false);
@@ -180,7 +179,7 @@ function VideoUpload() {
       formData.append("original_video", selectedFile);
 
       // Expect a ZIP back (binary)
-      const response = await axios.post(`${BACKEND_URL}/video/analyze`, formData, {
+      const response = await axios.post(`${API_URL}/video/analyze`, formData, {
         headers: { 
           "Content-Type": "multipart/form-data",
           "Accept": "application/zip, application/octet-stream"
