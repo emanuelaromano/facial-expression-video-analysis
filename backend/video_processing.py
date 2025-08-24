@@ -85,21 +85,38 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # Streaming endpoints
 ########################################################
 
-def get_video_stream():
-    states = ["initializing", "processing video", "processing frames", "processing audio", "completed"]
-    percentages = [0, 25, 50, 75, 100]
-    while states:
-        yield f"data: {json.dumps({'state': states[0], 'progress': percentages[0]})}\r\n\r\n".encode("utf-8")
-        states.pop(0)
-        states.append(states[0])
-        percentages.pop(0)
-        percentages.append(percentages[0])
-        time.sleep(2)
+class VideoStream:
+    def __init__(self, uuid: str):
+        self.states = {}
 
-@router.get("/stream")
-def stream():
+    def get_video_stream(self, uuid: str):
+        if uuid not in self.states.keys():
+            self.states[uuid] = {
+                "state": "initializing",
+                "progress": 0
+            }
+            yield f"data: {json.dumps({'state': self.states[uuid]['state'], 'progress': self.states[uuid]['progress']})}\r\n\r\n".encode("utf-8")
+            self.states[uuid]["progress"] += 25
+            time.sleep(2)
+        while self.states[uuid]["progress"] < 100:
+            yield f"data: {json.dumps({'state': self.states[uuid]['state'], 'progress': self.states[uuid]['progress']})}\r\n\r\n".encode("utf-8")
+            self.states[uuid]["progress"] += 25
+            time.sleep(2)
+        if self.states[uuid]["progress"] == 100:
+            self.states[uuid] = {
+                "state": "completed",
+                "progress": 100
+            }
+            yield f"data: {json.dumps({'state': self.states[uuid]['state'], 'progress': self.states[uuid]['progress']})}\r\n\r\n".encode("utf-8")
+            time.sleep(2)
+
+def get_video_stream(uuid: str):
+    return VideoStream(uuid).get_video_stream(uuid)
+
+@router.get("/stream/{uuid}")
+def stream(uuid: str):
     return StreamingResponse(
-        get_video_stream(), 
+        get_video_stream(uuid), 
         media_type="text/event-stream", 
         headers={
             "Cache-Control": "no-cache", 

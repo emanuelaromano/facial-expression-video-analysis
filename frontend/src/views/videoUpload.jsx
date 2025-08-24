@@ -178,7 +178,7 @@ function VideoUpload() {
     setTranscriptAnalysis(null);
 
     // Create EventSource for streaming updates
-    const eventSource = new EventSource(`${API_URL}/video/stream`);
+    const eventSource = new EventSource(`${API_URL}/video/stream/${videoId}`);
     
     eventSource.onmessage = (event) => {
       console.log("Stream update:", event.data);
