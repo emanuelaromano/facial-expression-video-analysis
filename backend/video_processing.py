@@ -4,23 +4,26 @@ import cv2
 import logging
 import subprocess
 from dotenv import load_dotenv
-from fastapi import APIRouter, File, UploadFile, Form, BackgroundTasks, HTTPException
+from fastapi import APIRouter, File, UploadFile, Form, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 from http import HTTPStatus
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import mediapipe as mp
-from threading import Lock
+from threading import Lock, Event
 from typing import Optional
 from openai import OpenAI
 from zipfile import ZipFile, ZIP_DEFLATED
 from fractions import Fraction
 import json
-
-router = APIRouter()
-client = OpenAI()
+import asyncio
+from subprocess import Popen, PIPE
 load_dotenv()
+
+OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
+router = APIRouter()
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Logging setup
 logger = logging.getLogger("hireview")
@@ -33,6 +36,14 @@ logger.propagate = False
 
 # Delete the temp folder at startup
 shutil.rmtree("temp", ignore_errors=True)
+
+# Utility: raise 499 if client disconnected
+async def _abort_if_disconnected(request: Request, cancel_event: Event):
+    # Give the event loop a chance to detect a closed socket
+    await asyncio.sleep(0)
+    if await request.is_disconnected():
+        cancel_event.set()
+        raise HTTPException(status_code=499, detail="Client Closed Request")
 
 ########################################################
 # Video processing globals
@@ -63,12 +74,14 @@ EMOTION_ID2LABEL = emotion_model.config.id2label
 ########################################################
 
 @router.post("/analyze", status_code=HTTPStatus.OK)
-def analyze_video(
+async def analyze_video(
+    request: Request,
     background_tasks: BackgroundTasks,
     uuid: str = Form(...),
     original_video: UploadFile = File(...),
     job_description: Optional[str] = Form("Data Engineer"),
-) -> FileResponse:
+):
+    cancel_event = Event()
     temp_dir = f"temp/{uuid}"
     temp_og_video_path = os.path.join(temp_dir, "video.mp4")
     temp_frames_dir = os.path.join(temp_dir, "frames")
@@ -87,11 +100,18 @@ def analyze_video(
 
         # Save video and extract info
         save_original_video(original_video, temp_og_video_path)
+        await _abort_if_disconnected(request, cancel_event)
+        
         fps_num, fps_den = get_fps_fraction(temp_og_video_path)
-        audio_path = extract_audio_ffmpeg(temp_og_video_path, temp_audio_path)
+        await _abort_if_disconnected(request, cancel_event)
+        
+        audio_path = extract_audio_ffmpeg(temp_og_video_path, temp_audio_path, cancel_event)
         if not audio_path:
             logger.warning("Audio extraction failed - video will be silent")
-        num_frames = split_video_into_frames(temp_og_video_path, temp_frames_dir)
+        await _abort_if_disconnected(request, cancel_event)
+        
+        num_frames = split_video_into_frames(temp_og_video_path, temp_frames_dir, cancel_event)
+        await _abort_if_disconnected(request, cancel_event)
 
         # Analyze only needed frames
         expressions = {}
@@ -107,17 +127,23 @@ def analyze_video(
         with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
             logger.info("Starting frame analysis...")
             futures = {
-                executor.submit(analyze_frame, os.path.join(temp_frames_dir, f"{i}.jpg"), i): i
+                executor.submit(analyze_frame, os.path.join(temp_frames_dir, f"{i}.jpg"), i, cancel_event): i
                 for i in needed_idxs
             }
             completed = 0
             for future in as_completed(futures):
+                # bail out quickly if canceled
+                if cancel_event.is_set():
+                    break
+                await _abort_if_disconnected(request, cancel_event)
                 idx = futures[future]
                 result = future.result()
                 expressions[str(idx)] = result or {}
                 completed += 1
                 if completed % 10 == 0 or completed == len(needed_idxs):
                     logger.info(f"Analyzed {completed}/{len(needed_idxs)} frames ({completed/len(needed_idxs)*100:.1f}%)")
+
+        await _abort_if_disconnected(request, cancel_event)
 
         # Rebuild frames using most recent analyzed indices
         logger.info(f"Starting frame rebuilding process for {num_frames} frames...")
@@ -126,6 +152,9 @@ def analyze_video(
         last_conf = None
 
         for i in range(num_frames):
+            if cancel_event.is_set():
+                raise HTTPException(status_code=499, detail="Client Closed Request")
+            await _abort_if_disconnected(request, cancel_event)
             mesh_idx = min((i // FACE_MESH_EVERY) * FACE_MESH_EVERY, num_frames - 1)
             emo_idx  = min((i // EMOTION_EVERY)  * EMOTION_EVERY,  num_frames - 1)
 
@@ -161,7 +190,10 @@ def analyze_video(
             temp_rebuilt_video_path,
             fps_num,
             fps_den,
+            cancel_event
         )
+        await _abort_if_disconnected(request, cancel_event)
+        
         if not os.path.exists(rebuilt_video_path):
             logger.error("rebuilt video not found at %s", rebuilt_video_path)
             raise HTTPException(status_code=500, detail="Failed to build output video")
@@ -170,12 +202,17 @@ def analyze_video(
         logger.info(f"Output video size: {os.path.getsize(rebuilt_video_path)} bytes")
 
         # Spoken-content analysis (guard for missing audio)
-        analyze_spoken_content(audio_path, job_description, analysis_path)
+        await _abort_if_disconnected(request, cancel_event)
+        analyze_spoken_content(audio_path, job_description, analysis_path, cancel_event)
+        await _abort_if_disconnected(request, cancel_event)
 
         with open(expressions_path, "w") as f:
             json.dump(expression_stats, f)
 
         # Bundle video + analysis into a ZIP
+        if cancel_event.is_set():
+            raise HTTPException(status_code=499, detail="Client Closed Request")
+            
         with ZipFile(bundle_path, "w", compression=ZIP_DEFLATED) as zf:
             zf.write(rebuilt_video_path, arcname=f"{uuid}.mp4")
             zf.write(analysis_path, arcname="spoken_content_analysis.txt")
@@ -230,11 +267,13 @@ def save_original_video(original_video: UploadFile, path: str) -> None:
         f.write(original_video.file.read())
 
 
-def split_video_into_frames(video_path: str, frames_dir: str) -> int:
+def split_video_into_frames(video_path: str, frames_dir: str, cancel_event: Event) -> int:
     video = cv2.VideoCapture(video_path)
     count = 0
     try:
         while True:
+            if cancel_event.is_set():
+                break
             ret, frame = video.read()
             if not ret:
                 break
@@ -246,11 +285,15 @@ def split_video_into_frames(video_path: str, frames_dir: str) -> int:
     return count
 
 
-def analyze_frame(frame_path: str, frame_index: int) -> dict:
+def analyze_frame(frame_path: str, frame_index: int, cancel_event: Event) -> dict:
     try:
+        if cancel_event.is_set():
+            return {"face_mesh": None, "emotion": None, "confidence": None}
         face_mesh, emotion, confidence = None, None, None
         if frame_index % FACE_MESH_EVERY == 0:
            face_mesh = face_mesh_analysis(frame_path, frame_index)
+        if cancel_event.is_set():
+            return {"face_mesh": None, "emotion": None, "confidence": None}
         if frame_index % EMOTION_EVERY == 0:
             emotion, confidence = emotion_analysis(frame_path, frame_index)
         return {
@@ -453,7 +496,7 @@ def get_fps_fraction(video_path: str) -> tuple[int, int]:
         # Safe default if probing fails
         return 30000, 1001
 
-def extract_audio_ffmpeg(input_video: str, output_audio: str) -> Optional[str]:
+def extract_audio_ffmpeg(input_video: str, output_audio: str, cancel_event: Event) -> Optional[str]:
     os.makedirs(os.path.dirname(output_audio), exist_ok=True)
 
     # Check for audio stream
@@ -492,7 +535,7 @@ def extract_audio_ffmpeg(input_video: str, output_audio: str) -> Optional[str]:
         return None
 
 def rebuild_video_ffmpeg(frames_dir: str, audio_path: Optional[str], output_path: str,
-                         fps_num: int, fps_den: int, keep_all_frames: bool = True) -> str:
+                         fps_num: int, fps_den: int, cancel_event: Event, keep_all_frames: bool = True) -> str:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fps_str = f"{fps_num}/{fps_den}"
 
@@ -525,12 +568,37 @@ def rebuild_video_ffmpeg(frames_dir: str, audio_path: Optional[str], output_path
         ]
 
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = Popen(cmd, stdout=PIPE, stderr=PIPE)
+        # Poll while watching for cancel
+        while True:
+            if cancel_event.is_set():
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                raise HTTPException(status_code=499, detail="Client Closed Request")
+            ret = proc.poll()
+            if ret is not None:
+                if ret != 0:
+                    # read a small chunk of stderr for logs
+                    err = (proc.stderr.read() or b"").decode(errors="ignore")[:400]
+                    logger.error(f"ffmpeg video rebuild failed (code {ret}): {err}")
+                    raise RuntimeError("ffmpeg failed")
+                break
+            # brief sleep to avoid busy-wait
+            time_sleep = 0.05
+            import time; time.sleep(time_sleep)
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
             raise RuntimeError(f"Output video not created: {output_path}")
         return output_path
-    except subprocess.CalledProcessError as e:
-        logger.error(f"ffmpeg video rebuild failed: {e.stderr.decode(errors='ignore')[:400]}")
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
+        logger.error(f"ffmpeg video rebuild failed: {e}")
         raise
 
 
@@ -538,7 +606,9 @@ def rebuild_video_ffmpeg(frames_dir: str, audio_path: Optional[str], output_path
 # Transcript analysis functions
 #################################
 
-def transcribe_audio(audio_path: str) -> str:
+def transcribe_audio(audio_path: str, cancel_event: Event) -> str:
+    if cancel_event.is_set():
+        return ""
     with open(audio_path, "rb") as f:
         transcript = client.audio.transcriptions.create(
             model="gpt-4o-mini-transcribe",
@@ -546,14 +616,18 @@ def transcribe_audio(audio_path: str) -> str:
         )
     return (transcript.text or "").strip()
 
-def analyze_spoken_content(audio_path: str, job_description: str, analysis_path: str) -> None:
+def analyze_spoken_content(audio_path: str, job_description: str, analysis_path: str, cancel_event: Event) -> None:
     spoken_content_analysis = "No audio stream found."
     try:
         if audio_path:
-            transcript = transcribe_audio(audio_path).strip()
+            if cancel_event.is_set():
+                return
+            transcript = transcribe_audio(audio_path, cancel_event).strip()
             if not transcript:
                 spoken_content_analysis = "No speech detected."
             else:
+                if cancel_event.is_set():
+                    return
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[

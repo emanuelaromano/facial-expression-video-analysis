@@ -14,6 +14,7 @@ function VideoUpload() {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
+  const analysisAbortRef = useRef(null);
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [recordVideo, setRecordVideo] = useState(false);
@@ -157,10 +158,6 @@ function VideoUpload() {
     }
   };
 
-  const handleCancelAnalysis = () => {
-    console.log("Cancel analysis");
-  };
-
   const handleRunAnalysis = useCallback(async () => {
     if (!selectedFile) {
       dispatch(
@@ -174,6 +171,9 @@ function VideoUpload() {
     setTranscriptAnalysis(null);
 
     try {
+      const controller = new AbortController();
+      analysisAbortRef.current = controller;
+
       const formData = new FormData();
       formData.append("uuid", videoId);
       formData.append("original_video", selectedFile);
@@ -185,6 +185,7 @@ function VideoUpload() {
           "Accept": "application/zip, application/octet-stream"
         },
         responseType: "blob",
+        signal: controller.signal,
       });
 
       if (response.status < 200 || response.status >= 300) {
@@ -212,10 +213,16 @@ function VideoUpload() {
 
       dispatch(setBannerThunk("Analysis complete", "success"));
     } catch (err) {
-      console.error("Analysis failed:", err);
-      dispatch(setBannerThunk("Analysis failed.", "error"));
+      if (err?.code === "ERR_CANCELED") {
+        console.log("Analysis canceled by user");
+        dispatch(setBannerThunk("Analysis canceled", "info"));
+      } else {
+        console.error("Analysis failed:", err);
+        dispatch(setBannerThunk("Analysis failed.", "error"));
+      }
     } finally {
       setAnalyzing(false);
+      analysisAbortRef.current = null;
     }
   }, [selectedFile, videoId, dispatch]);
 
@@ -227,9 +234,16 @@ function VideoUpload() {
 
   useEffect(() => () => stopMediaStream(), [stopMediaStream]);
 
+  const handleInterruptAnalysis = () => {
+    if (analysisAbortRef.current) {
+      analysisAbortRef.current.abort();
+    }
+  };
+
   // Cleanup processed video URL on unmount
   useEffect(() => {
     return () => {
+      analysisAbortRef.current?.abort();
       if (processedVideoUrl) {
         URL.revokeObjectURL(processedVideoUrl);
       }
@@ -348,10 +362,10 @@ function VideoUpload() {
                 </button>
               ) : analyzing ? (
                 <button
-                  onClick={handleCancelAnalysis}
+                  onClick={handleInterruptAnalysis}
                   className="bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 px-6 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
                 >
-                  Cancel
+                  Interrupt
                 </button>
               ) : (
                 <button

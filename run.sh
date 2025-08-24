@@ -32,6 +32,9 @@ elif [ "$1" == "-lint" ]; then
 else
     echo "Usage: ./run.sh [-f] [-g] [commit message]"
     echo "  -f: Run frontend"
+    echo "  -b: Run backend"
+    echo "  -fire: Deploy backend to firebase"
+    echo "  -lint: Run prettier on frontend"
     echo "  -g: Commit and push changes to remote repository (optional commit message)"
     echo "  -lint: Run prettier on frontend"
 fi

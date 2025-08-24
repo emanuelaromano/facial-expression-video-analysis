@@ -11,5 +11,3 @@ tf-keras==2.19.0
 transformers==4.44.2
 torch==2.3.1
 safetensors==0.4.4
-
-# Python 3.11.13
