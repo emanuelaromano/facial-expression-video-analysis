@@ -8,7 +8,9 @@ import JSZip from "jszip";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { API_URL } from "../../api";
-
+import ExpressionStats from "../components/expressionStats";
+import SectionTitle from "../components/sectionTitle";
+  
 function VideoUpload() {
   const dispatch = useDispatch();
   const fileInputRef = useRef(null);
@@ -390,7 +392,7 @@ function VideoUpload() {
                 </div>
               )}
             </div>
-            <div className="w-160 flex flex-col gap-4 justify-center mt-4 px-10">
+            <div className="w-160 flex flex-col gap-4 justify-center px-10">
               {analyzing && (
                 <div className="flex flex-col gap-3 items-center">
                   <div className="flex items-center gap-3">
@@ -410,8 +412,15 @@ function VideoUpload() {
                   </div>
                 </div>
               )}
+              {expressionStats && (
+                <div className="w-full">
+                  <SectionTitle title="Expression Analysis" />
+                  <ExpressionStats expressionStats={expressionStats} />
+                </div>
+              )}
               {transcriptAnalysis && (
-                <div className="w-full flex flex-col justify-center ">
+                <div className="w-full flex flex-col justify-center">
+                  <SectionTitle title="Transcript Analysis" />
                   <div className="prose prose-pink max-w-none">
                     <ReactMarkdown 
                       remarkPlugins={[remarkGfm]}
@@ -443,7 +452,7 @@ function VideoUpload() {
               ) : (
                 <button
                   onClick={resetVideoState}
-                  className="w-full bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
+                  className="w-full bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 my-4 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
                 >
                   Reset
                 </button>
