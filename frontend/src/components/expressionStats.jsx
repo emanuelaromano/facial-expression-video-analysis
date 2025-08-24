@@ -1,10 +1,12 @@
-import Plot from 'react-plotly.js';
+import Plot from "react-plotly.js";
 
 const ExpressionStats = ({ expressionStats }) => {
   // Transform the data for Plotly
-  const emotions = Object.keys(expressionStats || {}).map(emotion => emotion.charAt(0).toUpperCase() + emotion.slice(1));
-  const scores = Object.values(expressionStats || {}).map(score => 
-    typeof score === 'string' ? parseFloat(score) : score
+  const emotions = Object.keys(expressionStats || {}).map(
+    (emotion) => emotion.charAt(0).toUpperCase() + emotion.slice(1),
+  );
+  const scores = Object.values(expressionStats || {}).map((score) =>
+    typeof score === "string" ? parseFloat(score) : score,
   );
 
   // Create the chart data
@@ -12,94 +14,98 @@ const ExpressionStats = ({ expressionStats }) => {
     {
       x: emotions,
       y: scores,
-      type: 'bar',
+      type: "bar",
       marker: {
         color: [
-          '#06B6D4',
-          '#10B981',
-          '#F59E0B',
-          '#EF4444',
-          '#8B5CF6',
-          '#06B6D4',
-          '#EC4899',
-          '#10B981',
-          '#F97316',
-          '#6366F1',
-          '#84CC16',
-          '#F43F5E',
-          '#06B6D4',
-          '#10B981',
-          '#F59E0B',
-          '#EF4444',
+          "#06B6D4",
+          "#10B981",
+          "#F59E0B",
+          "#EF4444",
+          "#8B5CF6",
+          "#06B6D4",
+          "#EC4899",
+          "#10B981",
+          "#F97316",
+          "#6366F1",
+          "#84CC16",
+          "#F43F5E",
+          "#06B6D4",
+          "#10B981",
+          "#F59E0B",
+          "#EF4444",
         ],
         line: {
-          color: '#333',
-          width: 1
-        }
+          color: "#333",
+          width: 1,
+        },
       },
-      text: scores.map(score => (score * 100).toFixed(1) + '%'),
-      textposition: 'auto',
+      text: scores.map((score) => (score * 100).toFixed(1) + "%"),
+      textposition: "auto",
       textfont: {
         size: 12,
-        color: '#333'
+        color: "#333",
       },
-      hovertemplate: '%{x} (%{y:.1%})<extra></extra>'
-    }
+      hovertemplate: "%{x} (%{y:.1%})<extra></extra>",
+    },
   ];
 
   const layout = {
     xaxis: {
-      title: 'Emotions',
+      title: "Emotions",
       titlefont: {
         size: 14,
-        color: '#333'
+        color: "#333",
       },
       tickfont: {
         size: 12,
-        color: '#333'
-      }
+        color: "#333",
+      },
     },
     yaxis: {
-      title: 'Confidence Score',
+      title: "Confidence Score",
       titlefont: {
         size: 14,
-        color: '#333'
+        color: "#333",
       },
       tickfont: {
         size: 12,
-        color: '#333'
+        color: "#333",
       },
       range: [0, 1],
-      tickformat: '.0%'
+      tickformat: ".0%",
     },
     margin: {
       l: 60,
       r: 30,
       t: 60,
-      b: 60
+      b: 60,
     },
-    plot_bgcolor: 'rgba(0,0,0,0)',
-    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: "rgba(0,0,0,0)",
+    paper_bgcolor: "rgba(0,0,0,0)",
     showlegend: false,
     height: 400,
-    hovermode: 'closest',
+    hovermode: "closest",
     dragmode: false,
   };
 
   const config = {
     displayModeBar: false,
-    modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d', 'resetScale2d'],
+    modeBarButtonsToRemove: [
+      "pan2d",
+      "lasso2d",
+      "select2d",
+      "zoom2d",
+      "zoomIn2d",
+      "zoomOut2d",
+      "autoScale2d",
+      "resetScale2d",
+    ],
   };
 
   return (
     <div className="w-full p-1">
       {expressionStats && Object.keys(expressionStats).length > 0 ? (
-        <Plot
-          data={data}
-          layout={layout}
-          config={config}
-          className="w-full"
-        />
+        <Plot data={data} layout={layout} config={config} className="w-full" />
       ) : (
         <div className="text-center text-gray-500 py-8">
           No expression data available

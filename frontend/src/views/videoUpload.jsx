@@ -10,7 +10,7 @@ import remarkGfm from "remark-gfm";
 import { API_URL } from "../../api";
 import ExpressionStats from "../components/expressionStats";
 import SectionTitle from "../components/sectionTitle";
-  
+
 function VideoUpload() {
   const dispatch = useDispatch();
   const fileInputRef = useRef(null);
@@ -30,8 +30,11 @@ function VideoUpload() {
   const [analyzing, setAnalyzing] = useState(false);
   const videoIdRef = useRef(uuidv4());
   const videoId = videoIdRef.current;
-  const [progress, setProgress] = useState({progress: 0, state: "initializing"});
-  
+  const [progress, setProgress] = useState({
+    progress: 0,
+    state: "initializing",
+  });
+
   // Memoize the video URL to prevent recreation on every render
   const videoUrl = useMemo(() => {
     if (processedVideoUrl) return processedVideoUrl;
@@ -54,7 +57,7 @@ function VideoUpload() {
     setProcessedVideoUrl(null);
     setTranscriptAnalysis(null);
     setExpressionStats(null);
-    setProgress({progress: 0, state: "initializing"});
+    setProgress({ progress: 0, state: "initializing" });
     setAnalyzing(false);
     setCameraLoading(false);
     stopMediaStream();
@@ -82,13 +85,23 @@ function VideoUpload() {
   );
 
   const handleUploadVideo = () => {
+    // If analysis is running, abort it first
+    if (analyzing && analysisAbortRef.current) {
+      analysisAbortRef.current.abort();
+      setAnalyzing(false);
+    }
+
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
     fileInputRef.current.click();
   };
 
   const handleRecordVideo = useCallback(async () => {
+    if (analyzing && analysisAbortRef.current) {
+      analysisAbortRef.current.abort();
+      setAnalyzing(false);
+    }
     setSelectedFile(null);
     setRecordVideo(true);
     setCameraLoading(true);
@@ -198,12 +211,15 @@ function VideoUpload() {
 
     // Create EventSource for streaming updates
     const eventSource = new EventSource(`${API_URL}/video/stream/${videoId}`);
-    
+
     eventSource.onmessage = (event) => {
       console.log("Stream update:", event.data);
       const data = JSON.parse(event.data);
       // Add a small delay to make progress updates smoother
-      setTimeout(() => setProgress({progress: data.progress, state: data.state}), 100);
+      setTimeout(
+        () => setProgress({ progress: data.progress, state: data.state }),
+        100,
+      );
     };
 
     eventSource.onerror = (error) => {
@@ -221,9 +237,9 @@ function VideoUpload() {
 
       // Expect a ZIP back (binary)
       const response = await axios.post(`${API_URL}/video/analyze`, formData, {
-        headers: { 
+        headers: {
           "Content-Type": "multipart/form-data",
-          "Accept": "application/zip, application/octet-stream"
+          Accept: "application/zip, application/octet-stream",
         },
         responseType: "blob",
         signal: controller.signal,
@@ -358,7 +374,6 @@ function VideoUpload() {
               Record Video
             </button>
           </div>
-
           <p className="text-sm text-gray-500 mt-10">
             {selectedFile
               ? `${selectedFile.name} (${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)`
@@ -393,25 +408,6 @@ function VideoUpload() {
               )}
             </div>
             <div className="w-160 flex flex-col gap-4 justify-center px-10">
-              {analyzing && (
-                <div className="flex flex-col gap-3 items-center">
-                  <div className="flex items-center gap-3">
-                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-[var(--pink-500)]"></div>
-                    <p className="text-sm font-medium text-[var(--pink-500)] capitalize">
-                      {progress.state.replace(/_/g, ' ')}
-                    </p>
-                  </div>
-                  <div className="w-full flex flex-row gap-2 items-center">
-                    <div className="w-full h-2 bg-gray-200 rounded-full">
-                      <div
-                        className="h-full bg-[var(--pink-500)] rounded-full transition-all duration-500 ease-out"
-                        style={{ width: `${progress.progress}%` }}
-                      />
-                    </div>
-                    <p className="text-sm text-gray-500">{progress.progress}%</p>
-                  </div>
-                </div>
-              )}
               {expressionStats && (
                 <div className="w-full">
                   <SectionTitle title="Expression Analysis" />
@@ -422,12 +418,14 @@ function VideoUpload() {
                 <div className="w-full flex flex-col justify-center">
                   <SectionTitle title="Transcript Analysis" />
                   <div className="prose prose-pink max-w-none">
-                    <ReactMarkdown 
+                    <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{
-                        p: ({children, ...props}) => (
-                          <p className="mb-4" {...props}>{children}</p>
-                        )
+                        p: ({ children, ...props }) => (
+                          <p className="mb-4" {...props}>
+                            {children}
+                          </p>
+                        ),
                       }}
                     >
                       {transcriptAnalysis}
@@ -435,28 +433,54 @@ function VideoUpload() {
                   </div>
                 </div>
               )}
-              {!processedVideoUrl && !analyzing && !transcriptAnalysis && !expressionStats ? (
-                <button
-                  onClick={handleRunAnalysis}
-                  className="bg-white border-2 border-gray-300 hover:border-[var(--pink-500)] disabled:opacity-50 text-[var(--pink-500)] font-bold py-2 w-full rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl z-10"
-                >
-                  Run Analysis
-                </button>
-              ) : analyzing ? (
-                <button
-                  onClick={handleInterruptAnalysis}
-                  className="bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 px-6 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
-                >
-                  Interrupt
-                </button>
-              ) : (
-                <button
-                  onClick={resetVideoState}
-                  className="w-full bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 my-4 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
-                >
-                  Reset
-                </button>
-              )}
+              <div className="w-full my-4">
+                {!processedVideoUrl &&
+                !analyzing &&
+                !transcriptAnalysis &&
+                !expressionStats ? (
+                  <button
+                    onClick={handleRunAnalysis}
+                    className="bg-white border-2 border-gray-300 hover:border-[var(--pink-500)] disabled:opacity-50 text-[var(--pink-500)] font-bold py-2 w-full rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl z-10"
+                  >
+                    Run Analysis
+                  </button>
+                ) : analyzing ? (
+                  <div>
+                    <div className="flex flex-col gap-3 items-center mb-4 px-4">
+                      <div className="flex items-center gap-3">
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-[var(--pink-500)]"></div>
+                        <p className="text-sm font-medium text-[var(--pink-500)] capitalize">
+                          {progress.state.replace(/_/g, " ")}
+                        </p>
+                      </div>
+                      <div className="w-full flex flex-row gap-2 items-center">
+                        <div className="w-full h-2 bg-gray-200 rounded-full">
+                          <div
+                            className="h-full bg-[var(--pink-500)] rounded-full transition-all duration-500 ease-out"
+                            style={{ width: `${progress.progress}%` }}
+                          />
+                        </div>
+                        <p className="text-sm text-gray-500">
+                          {progress.progress}%
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleInterruptAnalysis}
+                      className="bg-white border-2 border-gray-300 hover:border-[var(--pink-500)] disabled:opacity-50 text-[var(--pink-500)] font-bold py-2 w-full rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl z-10"
+                    >
+                      Interrupt
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={resetVideoState}
+                    className="w-full bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}

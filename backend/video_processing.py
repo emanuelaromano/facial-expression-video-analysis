@@ -237,10 +237,11 @@ async def analyze_video(
                 result = future.result()
                 expressions[str(idx)] = result or {}
                 completed += 1
-                if completed % 10 == 0 or completed == len(needed_idxs):
-                    progress = int(round(completed/len(needed_idxs)*50, 0) + 10)
+                if completed % 5 == 0 or completed == len(needed_idxs):
+                    progress = int(10 + round(completed/len(needed_idxs) * 30, 0))
                     update_status(uuid, "analyzing frames", progress)
-                    logger.info(f"Analyzed {completed}/{len(needed_idxs)} frames ({completed/len(needed_idxs)*100:.1f}%)")
+                    if completed % 10 == 0:
+                        logger.info(f"Analyzed {completed}/{len(needed_idxs)} frames ({completed/len(needed_idxs)*100:.1f}%)")
 
         await _abort_if_disconnected(request, cancel_event)
 
@@ -283,9 +284,7 @@ async def analyze_video(
         logger.info(f"Frame rebuilding completed. Starting video reconstruction...")
         
         # Normalize expression stats
-        total_expressions = sum(expression_stats.values())
-        for label, count in expression_stats.items():
-            expression_stats[label] = round(count / total_expressions, 2) if total_expressions > 0 else 0
+        normalized_expression_stats = normalize_expression_stats(expression_stats)
 
         # Rebuild video
         update_status(uuid, "rebuilding video", 90)
@@ -313,7 +312,7 @@ async def analyze_video(
         await _abort_if_disconnected(request, cancel_event)
 
         with open(expressions_path, "w") as f:
-            json.dump(expression_stats, f)
+            json.dump(normalized_expression_stats, f)
 
         # Bundle video + analysis into a ZIP
         if cancel_event.is_set():
@@ -495,9 +494,10 @@ def rebuild_frame(
     expression: Optional[dict] = None
 ) -> None:
     # Only log every 10th frame to reduce log noise, but always log the last frame
-    if frame_index % 10 == 0 or frame_index == num_frames - 1:
-        update_status(uuid, "rebuilding frames", int(round(60 + frame_index * 30 / num_frames, 0)))
-        logger.info(f"Rebuilding frame {frame_index + 1}/{num_frames}")
+    if frame_index % 5 == 0 or frame_index == num_frames - 1:
+        update_status(uuid, "rebuilding frames", int(round(40 + frame_index * 30 / num_frames, 0)))
+        if frame_index % 10 == 0:
+            logger.info(f"Rebuilding frame {frame_index + 1}/{num_frames}")
     
     frame_path = os.path.join(temp_frames_dir, f"{frame_index}.jpg")
     frame_image = cv2.imread(frame_path)
@@ -756,6 +756,21 @@ def analyze_spoken_content(audio_path: str, job_description: str, analysis_path:
     with open(analysis_path, "w", encoding="utf-8") as f:
         f.write(spoken_content_analysis)
 
+def normalize_expression_stats(expression_stats: dict) -> dict:
+    # Normalize the expression stats to be between 0 and 1
+    total_expressions = sum(expression_stats.values())
+    normalized_expression_stats = {}
+    other_count = 0
+    for label, count in expression_stats.items():
+        value = round(count / total_expressions, 2) if total_expressions > 0 else 0
+        if value < 0.02:
+            other_count += value
+        else:
+            normalized_expression_stats[label] = value
+    if other_count > 0:
+        normalized_expression_stats["other"] = other_count
+    return normalized_expression_stats
+
 def delayed_rmtree(path: str, delay_seconds: int = 30):
     time.sleep(delay_seconds)
     shutil.rmtree(path, ignore_errors=True)
@@ -765,3 +780,4 @@ def delayed_cleanup_status(uuid: str, delay_seconds: int = 60):
     time.sleep(delay_seconds)
     cleanup_status(uuid)
     logger.info(f"Cleaned up status for {uuid}")
+
