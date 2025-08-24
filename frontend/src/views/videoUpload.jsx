@@ -124,7 +124,7 @@ function VideoUpload() {
     } finally {
       setCameraLoading(false);
     }
-  }, [dispatch]);
+  }, [dispatch, analyzing]);
 
   const handleStartRecording = () => {
     if (!mediaStream) return;
