@@ -63,4 +63,4 @@ COPY . .
 RUN python -c "from transformers import AutoImageProcessor, AutoModelForImageClassification; AutoImageProcessor.from_pretrained('mo-thecreator/vit-Facial-Expression-Recognition'); AutoModelForImageClassification.from_pretrained('mo-thecreator/vit-Facial-Expression-Recognition')"
 
 # Run app
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --no-access-log --log-level info"]

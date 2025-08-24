@@ -19,11 +19,16 @@ from fractions import Fraction
 import json
 import asyncio
 from subprocess import Popen, PIPE
+import time
+from fastapi.responses import StreamingResponse
+
 load_dotenv()
 
-OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
 router = APIRouter()
-client = OpenAI(api_key=OPENAI_API_KEY)
+
+########################################################
+# Logging setup
+########################################################
 
 # Logging setup
 logger = logging.getLogger("hireview")
@@ -34,8 +39,9 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 logger.propagate = False
 
-# Delete the temp folder at startup
-shutil.rmtree("temp", ignore_errors=True)
+########################################################
+# Utility functions
+########################################################
 
 # Utility: raise 499 if client disconnected
 async def _abort_if_disconnected(request: Request, cancel_event: Event):
@@ -45,6 +51,9 @@ async def _abort_if_disconnected(request: Request, cancel_event: Event):
         cancel_event.set()
         raise HTTPException(status_code=499, detail="Client Closed Request")
 
+# Delete the temp folder at startup
+shutil.rmtree("temp", ignore_errors=True)
+
 ########################################################
 # Video processing globals
 ########################################################
@@ -52,6 +61,7 @@ async def _abort_if_disconnected(request: Request, cancel_event: Event):
 FACE_MESH_EVERY = int(os.getenv("FACE_MESH_EVERY", "2"))
 EMOTION_EVERY   = int(os.getenv("EMOTION_EVERY", "10"))
 NUM_WORKERS     = int(os.getenv("NUM_WORKERS", "4"))
+OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
 
 # Building the face mesh
 mp_face_mesh = mp.solutions.face_mesh
@@ -68,6 +78,36 @@ emotion_processor = AutoImageProcessor.from_pretrained("mo-thecreator/vit-Facial
 emotion_model = AutoModelForImageClassification.from_pretrained("mo-thecreator/vit-Facial-Expression-Recognition").eval()
 EMOTION_ID2LABEL = emotion_model.config.id2label
 
+# Transcription client
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+########################################################
+# Streaming endpoints
+########################################################
+
+def get_video_stream():
+    states = ["initializing", "processing video", "processing frames", "processing audio", "completed"]
+    percentages = [0, 25, 50, 75, 100]
+    while states:
+        yield f"data: {json.dumps({'state': states[0], 'progress': percentages[0]})}\r\n\r\n".encode("utf-8")
+        states.pop(0)
+        states.append(states[0])
+        percentages.pop(0)
+        percentages.append(percentages[0])
+        time.sleep(2)
+
+@router.get("/stream")
+def stream():
+    return StreamingResponse(
+        get_video_stream(), 
+        media_type="text/event-stream", 
+        headers={
+            "Cache-Control": "no-cache", 
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
+        }
+    )
 
 ########################################################
 # API endpoints

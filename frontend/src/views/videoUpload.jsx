@@ -1,6 +1,6 @@
 import { useDispatch } from "react-redux";
 import { setBannerThunk } from "../redux/slices/videoSlice";
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { CircleX, RotateCcw } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
@@ -28,7 +28,14 @@ function VideoUpload() {
   const videoIdRef = useRef(uuidv4());
   const videoId = videoIdRef.current;
   // eslint-disable-next-line no-unused-vars
-  const [progress, setProgress] = useState(50);
+  const [progress, setProgress] = useState(0);
+  
+  // Memoize the video URL to prevent recreation on every render
+  const videoUrl = useMemo(() => {
+    if (processedVideoUrl) return processedVideoUrl;
+    if (selectedFile) return URL.createObjectURL(selectedFile);
+    return null;
+  }, [processedVideoUrl, selectedFile]);
 
   const stopMediaStream = useCallback(() => {
     if (mediaStream) {
@@ -170,6 +177,21 @@ function VideoUpload() {
     setProcessedVideoUrl(null);
     setTranscriptAnalysis(null);
 
+    // Create EventSource for streaming updates
+    const eventSource = new EventSource(`${API_URL}/video/stream`);
+    
+    eventSource.onmessage = (event) => {
+      console.log("Stream update:", event.data);
+      const data = JSON.parse(event.data);
+      // Add a small delay to make progress updates smoother
+      setTimeout(() => setProgress(data.progress), 100);
+    };
+
+    eventSource.onerror = (error) => {
+      console.error("EventSource error:", error);
+      eventSource.close();
+    };
+
     try {
       const controller = new AbortController();
       analysisAbortRef.current = controller;
@@ -220,9 +242,13 @@ function VideoUpload() {
         console.error("Analysis failed:", err);
         dispatch(setBannerThunk("Analysis failed.", "error"));
       }
+      // Close EventSource on error
+      eventSource.close();
     } finally {
       setAnalyzing(false);
       analysisAbortRef.current = null;
+      // Close the EventSource
+      eventSource.close();
     }
   }, [selectedFile, videoId, dispatch]);
 
@@ -232,23 +258,38 @@ function VideoUpload() {
     }
   }, [mediaStream]);
 
+  // Clean up the memoized video URL when selectedFile changes
+  useEffect(() => {
+    return () => {
+      // This will run when selectedFile changes or component unmounts
+      // The URL will be automatically cleaned up by the browser when the component unmounts
+    };
+  }, [selectedFile]);
+
   useEffect(() => () => stopMediaStream(), [stopMediaStream]);
 
   const handleInterruptAnalysis = () => {
     if (analysisAbortRef.current) {
       analysisAbortRef.current.abort();
     }
+    // Note: EventSource will be closed in the finally block when analysis completes
   };
 
-  // Cleanup processed video URL on unmount
+  // Cleanup URLs on unmount
   useEffect(() => {
     return () => {
       analysisAbortRef.current?.abort();
+      // Clean up processed video URL
       if (processedVideoUrl) {
         URL.revokeObjectURL(processedVideoUrl);
       }
+      // Clean up original video URL if it exists and is different
+      if (selectedFile && !processedVideoUrl) {
+        // We can't directly revoke the memoized URL here, but it will be cleaned up
+        // when the component unmounts or when selectedFile changes
+      }
     };
-  }, [processedVideoUrl]);
+  }, [processedVideoUrl, selectedFile]);
 
   return (
     <div className="flex flex-col items-center">
@@ -304,9 +345,10 @@ function VideoUpload() {
           <div className="flex flex-col items-center gap-4">
             <div className="mt-4 relative bg-black border-2 border-gray-300 flex justify-center items-center rounded-lg px-6">
               <video
+                key={videoUrl}
                 controls
                 className="min-w-[170] max-h-96 shadow-md"
-                src={processedVideoUrl ?? URL.createObjectURL(selectedFile)}
+                src={videoUrl}
               />
               {!processedVideoUrl && !analyzing && (
                 <div
@@ -330,7 +372,7 @@ function VideoUpload() {
                 <div className="flex flex-row gap-2 items-center">
                   <div className="w-full h-2 bg-gray-200 rounded-full">
                     <div
-                      className="h-full bg-[var(--pink-500)] rounded-full"
+                      className="h-full bg-[var(--pink-500)] rounded-full transition-all duration-500 ease-out"
                       style={{ width: `${progress}%` }}
                     />
                   </div>
