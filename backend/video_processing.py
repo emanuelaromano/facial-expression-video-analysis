@@ -43,9 +43,8 @@ logger.propagate = False
 # Utility functions
 ########################################################
 
-# Utility: raise 499 if client disconnected
+# Client disconnect handling
 async def _abort_if_disconnected(request: Request, cancel_event: Event):
-    # Give the event loop a chance to detect a closed socket
     await asyncio.sleep(0)
     if await request.is_disconnected():
         cancel_event.set()
@@ -82,39 +81,77 @@ EMOTION_ID2LABEL = emotion_model.config.id2label
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 ########################################################
-# Streaming endpoints
+# SSE Streaming endpoints
 ########################################################
 
 class VideoStream:
-    def __init__(self, uuid: str):
-        self.states = {}
+    states = {}
 
-    def get_video_stream(self, uuid: str):
+    def __init__(self, uuid: str):
+        pass
+
+    def initialize_status(self, uuid: str):
         if uuid not in self.states.keys():
             self.states[uuid] = {
                 "state": "initializing",
-                "progress": 0
+                "progress": 2
             }
-            yield f"data: {json.dumps({'state': self.states[uuid]['state'], 'progress': self.states[uuid]['progress']})}\r\n\r\n".encode("utf-8")
-            self.states[uuid]["progress"] += 25
-            time.sleep(2)
-        while self.states[uuid]["progress"] < 100:
-            yield f"data: {json.dumps({'state': self.states[uuid]['state'], 'progress': self.states[uuid]['progress']})}\r\n\r\n".encode("utf-8")
-            self.states[uuid]["progress"] += 25
-            time.sleep(2)
-        if self.states[uuid]["progress"] == 100:
-            self.states[uuid] = {
-                "state": "completed",
-                "progress": 100
-            }
-            yield f"data: {json.dumps({'state': self.states[uuid]['state'], 'progress': self.states[uuid]['progress']})}\r\n\r\n".encode("utf-8")
-            time.sleep(2)
+        else:
+            self.states[uuid]["state"] = "initializing"
+            self.states[uuid]["progress"] = 2
+
+    def update_status(self, uuid: str, state: str, progress: int):
+        self.states[uuid] = {
+            "state": state,
+            "progress": progress
+        }
+
+    def get_video_stream(self, uuid: str):
+        try:
+            while self.states[uuid]["progress"] < 100:
+                yield f"data: {json.dumps({'state': self.states[uuid]['state'], 'progress': self.states[uuid]['progress']})}\r\n\r\n".encode("utf-8")
+                time.sleep(2)
+            if self.states[uuid]["progress"] == 100:
+                self.update_status(uuid, "completed", 100)
+                yield f"data: {json.dumps({'state': self.states[uuid]['state'], 'progress': self.states[uuid]['progress']})}\r\n\r\n".encode("utf-8")
+                time.sleep(2)
+        except Exception as e:
+            logger.error(f"Error in video stream for {uuid}: {e}")
+            error_data = {"state": "error", "progress": self.states[uuid]["progress"]}
+            yield f"data: {json.dumps(error_data)}\r\n\r\n".encode("utf-8")
+    
+    def cleanup(self, uuid: str):
+        if uuid in self.states:
+            del self.states[uuid]
 
 def get_video_stream(uuid: str):
-    return VideoStream(uuid).get_video_stream(uuid)
+    try:
+        return VideoStream(uuid).get_video_stream(uuid)
+    except Exception as e:
+        logger.error(f"Error getting video stream for {uuid}: {e}")
+        return None
+
+def update_status(uuid: str, state: str, progress: int):
+    try:
+        VideoStream(uuid).update_status(uuid, state, progress)
+    except Exception as e:
+        logger.error(f"Error updating status for {uuid}: {e}")
+
+def initialize_status(uuid: str):
+    try:
+        VideoStream(uuid).initialize_status(uuid)
+    except Exception as e:
+        logger.error(f"Error initializing status for {uuid}: {e}")
+
+def cleanup_status(uuid: str):
+    try:
+        VideoStream(uuid).cleanup(uuid)
+    except Exception as e:
+        logger.error(f"Error cleaning up status for {uuid}: {e}")
 
 @router.get("/stream/{uuid}")
 def stream(uuid: str):
+    initialize_status(uuid)
     return StreamingResponse(
         get_video_stream(uuid), 
         media_type="text/event-stream", 
@@ -138,6 +175,7 @@ async def analyze_video(
     original_video: UploadFile = File(...),
     job_description: Optional[str] = Form("Data Engineer"),
 ):
+    initialize_status(uuid)
     cancel_event = Event()
     temp_dir = f"temp/{uuid}"
     temp_og_video_path = os.path.join(temp_dir, "video.mp4")
@@ -154,6 +192,7 @@ async def analyze_video(
         # Create temp folders
         os.makedirs(temp_frames_dir, exist_ok=True)
         os.makedirs(temp_processed_dir, exist_ok=True)
+        update_status(uuid, "saving video", 5)
 
         # Save video and extract info
         save_original_video(original_video, temp_og_video_path)
@@ -162,6 +201,7 @@ async def analyze_video(
         fps_num, fps_den = get_fps_fraction(temp_og_video_path)
         await _abort_if_disconnected(request, cancel_event)
         
+        update_status(uuid, "extracting audio", 10)
         audio_path = extract_audio_ffmpeg(temp_og_video_path, temp_audio_path, cancel_event)
         if not audio_path:
             logger.warning("Audio extraction failed - video will be silent")
@@ -198,6 +238,8 @@ async def analyze_video(
                 expressions[str(idx)] = result or {}
                 completed += 1
                 if completed % 10 == 0 or completed == len(needed_idxs):
+                    progress = int(round(completed/len(needed_idxs)*50, 0) + 10)
+                    update_status(uuid, "analyzing frames", progress)
                     logger.info(f"Analyzed {completed}/{len(needed_idxs)} frames ({completed/len(needed_idxs)*100:.1f}%)")
 
         await _abort_if_disconnected(request, cancel_event)
@@ -236,11 +278,17 @@ async def analyze_video(
                 "emotion": label,
                 "confidence": conf,
             }
-            rebuild_frame(i, temp_frames_dir, temp_processed_dir, num_frames, final_expression)
+            rebuild_frame(i, temp_frames_dir, temp_processed_dir, num_frames, uuid, final_expression)
 
         logger.info(f"Frame rebuilding completed. Starting video reconstruction...")
         
+        # Normalize expression stats
+        total_expressions = sum(expression_stats.values())
+        for label, count in expression_stats.items():
+            expression_stats[label] = round(count / total_expressions, 2) if total_expressions > 0 else 0
+
         # Rebuild video
+        update_status(uuid, "rebuilding video", 90)
         rebuilt_video_path = rebuild_video_ffmpeg(
             temp_processed_dir,
             audio_path,
@@ -260,6 +308,7 @@ async def analyze_video(
 
         # Spoken-content analysis (guard for missing audio)
         await _abort_if_disconnected(request, cancel_event)
+        update_status(uuid, "transcribing audio", 95)
         analyze_spoken_content(audio_path, job_description, analysis_path, cancel_event)
         await _abort_if_disconnected(request, cancel_event)
 
@@ -271,7 +320,7 @@ async def analyze_video(
             raise HTTPException(status_code=499, detail="Client Closed Request")
             
         with ZipFile(bundle_path, "w", compression=ZIP_DEFLATED) as zf:
-            zf.write(rebuilt_video_path, arcname=f"{uuid}.mp4")
+            zf.write(rebuilt_video_path, arcname="processed_video.mp4")
             zf.write(analysis_path, arcname="spoken_content_analysis.txt")
             zf.write(expressions_path, arcname="expression_stats.json")
 
@@ -287,13 +336,14 @@ async def analyze_video(
         
         logger.info(f"Analysis complete for video {uuid}. Bundle created: {bundle_path}")
         logger.info(f"Bundle size: {bundle_size} bytes")
+        update_status(uuid, "completed", 100)
         
         # Verify ZIP file integrity
         try:
             with ZipFile(bundle_path, 'r') as test_zip:
                 file_list = test_zip.namelist()
                 logger.info(f"ZIP contents: {file_list}")
-                if f"{uuid}.mp4" not in file_list or "spoken_content_analysis.txt" not in file_list:
+                if f"processed_video.mp4" not in file_list or "spoken_content_analysis.txt" not in file_list:
                     logger.error(f"ZIP file missing required contents: {file_list}")
                     raise HTTPException(status_code=500, detail="Output bundle is corrupted")
         except Exception as e:
@@ -302,6 +352,8 @@ async def analyze_video(
 
         # Cleanup AFTER response is sent
         background_tasks.add_task(delayed_rmtree, temp_dir, 30)
+        # Also cleanup status after a delay to ensure streaming is complete
+        background_tasks.add_task(delayed_cleanup_status, uuid, 30)
 
         return FileResponse(
             path=bundle_path,
@@ -439,10 +491,12 @@ def rebuild_frame(
     temp_frames_dir: str,
     temp_processed_dir: str,
     num_frames: int,
+    uuid: str,
     expression: Optional[dict] = None
 ) -> None:
     # Only log every 10th frame to reduce log noise, but always log the last frame
     if frame_index % 10 == 0 or frame_index == num_frames - 1:
+        update_status(uuid, "rebuilding frames", int(round(60 + frame_index * 30 / num_frames, 0)))
         logger.info(f"Rebuilding frame {frame_index + 1}/{num_frames}")
     
     frame_path = os.path.join(temp_frames_dir, f"{frame_index}.jpg")
@@ -703,6 +757,11 @@ def analyze_spoken_content(audio_path: str, job_description: str, analysis_path:
         f.write(spoken_content_analysis)
 
 def delayed_rmtree(path: str, delay_seconds: int = 30):
-    import time
     time.sleep(delay_seconds)
     shutil.rmtree(path, ignore_errors=True)
+    logger.info(f"Cleaned up {path}")
+
+def delayed_cleanup_status(uuid: str, delay_seconds: int = 60):
+    time.sleep(delay_seconds)
+    cleanup_status(uuid)
+    logger.info(f"Cleaned up status for {uuid}")

@@ -24,11 +24,11 @@ function VideoUpload() {
   const [wasRecorded, setWasRecorded] = useState(false);
   const [transcriptAnalysis, setTranscriptAnalysis] = useState(null);
   const [processedVideoUrl, setProcessedVideoUrl] = useState(null);
+  const [expressionStats, setExpressionStats] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const videoIdRef = useRef(uuidv4());
   const videoId = videoIdRef.current;
-  // eslint-disable-next-line no-unused-vars
-  const [progress, setProgress] = useState(0);
+  const [progress, setProgress] = useState({progress: 0, state: "initializing"});
   
   // Memoize the video URL to prevent recreation on every render
   const videoUrl = useMemo(() => {
@@ -51,11 +51,17 @@ function VideoUpload() {
     setRecording(false);
     setProcessedVideoUrl(null);
     setTranscriptAnalysis(null);
+    setExpressionStats(null);
+    setProgress({progress: 0, state: "initializing"});
+    setAnalyzing(false);
+    setCameraLoading(false);
     stopMediaStream();
     if (videoRef.current) {
       videoRef.current.srcObject = null;
       videoRef.current.load();
     }
+    // Reset the video ID for a fresh analysis
+    videoIdRef.current = uuidv4();
   }, [stopMediaStream]);
 
   const handleVideoUpload = useCallback(
@@ -73,7 +79,12 @@ function VideoUpload() {
     [resetVideoState, dispatch],
   );
 
-  const handleUploadVideo = () => fileInputRef.current.click();
+  const handleUploadVideo = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    fileInputRef.current.click();
+  };
 
   const handleRecordVideo = useCallback(async () => {
     setSelectedFile(null);
@@ -159,6 +170,12 @@ function VideoUpload() {
     setRecording(true);
   };
 
+  useEffect(() => {
+    if (expressionStats) {
+      console.log(expressionStats);
+    }
+  }, [expressionStats]);
+
   const handleStopRecording = () => {
     if (mediaRecorderRef.current && recording) {
       mediaRecorderRef.current.stop();
@@ -184,7 +201,7 @@ function VideoUpload() {
       console.log("Stream update:", event.data);
       const data = JSON.parse(event.data);
       // Add a small delay to make progress updates smoother
-      setTimeout(() => setProgress(data.progress), 100);
+      setTimeout(() => setProgress({progress: data.progress, state: data.state}), 100);
     };
 
     eventSource.onerror = (error) => {
@@ -218,10 +235,11 @@ function VideoUpload() {
       const zip = await JSZip.loadAsync(response.data);
 
       const analysisEntry = zip.file("spoken_content_analysis.txt");
-      const videoEntry = zip.file(`${videoId}.mp4`);
+      const videoEntry = zip.file("processed_video.mp4");
+      const expressionStatsEntry = zip.file("expression_stats.json");
 
-      if (!analysisEntry || !videoEntry) {
-        throw new Error("ZIP missing analysis or video");
+      if (!analysisEntry || !videoEntry || !expressionStatsEntry) {
+        throw new Error("ZIP missing analysis or video or expression stats");
       }
 
       // Load analysis text
@@ -232,6 +250,11 @@ function VideoUpload() {
       const videoBlob = await videoEntry.async("blob");
       const url = URL.createObjectURL(videoBlob);
       setProcessedVideoUrl(url);
+
+      // Load expression stats
+      const expressionStatsText = await expressionStatsEntry.async("text");
+      const expressionStatsDict = JSON.parse(expressionStatsText);
+      setExpressionStats(expressionStatsDict);
 
       dispatch(setBannerThunk("Analysis complete", "success"));
     } catch (err) {
@@ -369,14 +392,22 @@ function VideoUpload() {
             </div>
             <div className="w-160 flex flex-col gap-4 justify-center mt-4 px-10">
               {analyzing && (
-                <div className="flex flex-row gap-2 items-center">
-                  <div className="w-full h-2 bg-gray-200 rounded-full">
-                    <div
-                      className="h-full bg-[var(--pink-500)] rounded-full transition-all duration-500 ease-out"
-                      style={{ width: `${progress}%` }}
-                    />
+                <div className="flex flex-col gap-3 items-center">
+                  <div className="flex items-center gap-3">
+                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-[var(--pink-500)]"></div>
+                    <p className="text-sm font-medium text-[var(--pink-500)] capitalize">
+                      {progress.state.replace(/_/g, ' ')}
+                    </p>
                   </div>
-                  <p className="text-sm text-gray-500">{progress}%</p>
+                  <div className="w-full flex flex-row gap-2 items-center">
+                    <div className="w-full h-2 bg-gray-200 rounded-full">
+                      <div
+                        className="h-full bg-[var(--pink-500)] rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${progress.progress}%` }}
+                      />
+                    </div>
+                    <p className="text-sm text-gray-500">{progress.progress}%</p>
+                  </div>
                 </div>
               )}
               {transcriptAnalysis && (
@@ -395,7 +426,7 @@ function VideoUpload() {
                   </div>
                 </div>
               )}
-              {!processedVideoUrl && !analyzing && !transcriptAnalysis ? (
+              {!processedVideoUrl && !analyzing && !transcriptAnalysis && !expressionStats ? (
                 <button
                   onClick={handleRunAnalysis}
                   className="bg-white border-2 border-gray-300 hover:border-[var(--pink-500)] disabled:opacity-50 text-[var(--pink-500)] font-bold py-2 w-full rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl z-10"
