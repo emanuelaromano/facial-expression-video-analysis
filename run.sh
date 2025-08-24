@@ -9,6 +9,9 @@ if [ "$1" == "-g" ] && [ "$2" != "" ]; then
     git push
     echo "Changes pushed to remote repository"
 elif [ "$1" == "-g" ]; then
+    cd frontend
+    npx prettier --write .
+    cd ..
     git add .
     git commit -m "Update"
     git push
