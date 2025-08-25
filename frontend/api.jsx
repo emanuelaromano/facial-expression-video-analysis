@@ -1,4 +1,4 @@
-const status = "prod";
+const status = "dev";
 export const API_URL =
   status === "prod"
     ? "https://hireview-prep-916307297241.us-central1.run.app"

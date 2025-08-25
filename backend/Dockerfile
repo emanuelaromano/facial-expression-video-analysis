@@ -23,7 +23,7 @@ COPY requirements.txt /app/requirements.txt
 
 # 2) Install Python deps with pinned pip version for stable layer digest
 RUN python -m pip install --upgrade "pip==25.2"
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r /app/requirements.txt
 
 # 3) (Important) Pre-download HF model *before* app code so code edits don't invalidate this cache
 RUN python - <<'PY'
@@ -33,10 +33,8 @@ AutoImageProcessor.from_pretrained(name)
 AutoModelForImageClassification.from_pretrained(name)
 PY
 
-# 4) Now copy the app code (later layers only) - be selective to preserve cache
-COPY main.py /app/
-COPY video_processing.py /app/
-COPY .env* /app/ 2>/dev/null || true
+# 4) Now copy the app code (later layers only)
+COPY . /app
 
 # 5) Entrypoint
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --no-access-log --log-level info"]
