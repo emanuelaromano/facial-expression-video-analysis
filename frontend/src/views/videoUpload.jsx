@@ -119,11 +119,16 @@ function VideoUpload() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: {
+          width: { min: 1280, ideal: 1920, max: 3840 },
+          height: { min: 720, ideal: 1080, max: 2160 },
+          frameRate: { ideal: 30, max: 30 },
+          facingMode: "user",
+        },
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 44100,
+          sampleRate: 48000,
         },
       });
 
@@ -159,18 +164,28 @@ function VideoUpload() {
     oscillator.start(audioContext.currentTime);
     oscillator.stop(audioContext.currentTime + 0.1);
 
-    const options = { mimeType: "video/webm;codecs=vp8,opus" };
-    let recorder;
+    const preferredTypes = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    ];
+    let mimeType =
+      preferredTypes.find((t) => MediaRecorder.isTypeSupported(t)) || "";
 
+    let recorder;
     try {
-      recorder = new MediaRecorder(mediaStream, options);
+      recorder = new MediaRecorder(mediaStream, {
+        mimeType,
+        videoBitsPerSecond: 6_000_000,
+        audioBitsPerSecond: 128_000,
+      });
     } catch {
-      try {
-        recorder = new MediaRecorder(mediaStream, { mimeType: "video/webm" });
-      } catch {
-        recorder = new MediaRecorder(mediaStream);
-      }
+      recorder = new MediaRecorder(mediaStream);
     }
+
+    console.log("Recorder mimeType:", recorder.mimeType);
+    const [videoTrack] = mediaStream.getVideoTracks();
+    console.log("Actual cam settings:", videoTrack.getSettings());
 
     mediaRecorderRef.current = recorder;
     const chunks = [];
@@ -180,9 +195,14 @@ function VideoUpload() {
     };
 
     recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: "video/webm" });
-      const file = new File([blob], "recorded-video.webm", {
-        type: "video/webm",
+      const blob = new Blob(chunks, {
+        type: recorder.mimeType || "video/webm",
+      });
+      const fileExt = (recorder.mimeType || "").includes("mp4")
+        ? "mp4"
+        : "webm";
+      const file = new File([blob], `recorded-video.${fileExt}`, {
+        type: blob.type,
       });
       setSelectedFile(file);
       setWasRecorded(true);
@@ -441,7 +461,7 @@ function VideoUpload() {
               <video
                 key={videoUrl}
                 controls
-                className="w-full h-fit shadow-md"
+                className="w-full shadow-md"
                 src={videoUrl}
               />
               {!processedVideoUrl && !analyzing && (
@@ -554,7 +574,7 @@ function VideoUpload() {
                   autoPlay
                   playsInline
                   muted
-                  className="w-full h-fit object-contain bg-gray-800"
+                  className="w-full object-contain bg-gray-800"
                   style={{ minHeight: "300px", transform: "scaleX(-1)" }}
                 />
                 {recording && (
