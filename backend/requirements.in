@@ -15,3 +15,5 @@ python-multipart==0.0.20
 transformers==4.44.2
 torch==2.2.2              
 safetensors==0.4.4
+triton==3.4.0 ; sys_platform == "linux" and platform_machine == "x86_64"
+
