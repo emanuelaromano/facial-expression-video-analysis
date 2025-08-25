@@ -1,7 +1,9 @@
 #!/bin/bash
 
+base_dir="/Users/emanuelaromano/Desktop/hireview-prep"
+
 if [ "$1" == "-g" ] && [ "$2" != "" ]; then
-    cd frontend
+    cd $base_dir/frontend
     npx prettier --write .
     cd ..
     git add .
@@ -9,7 +11,7 @@ if [ "$1" == "-g" ] && [ "$2" != "" ]; then
     git push
     echo "Changes pushed to remote repository"
 elif [ "$1" == "-g" ]; then
-    cd frontend
+    cd $base_dir/frontend
     npx prettier --write .
     cd ..
     git add .
@@ -17,19 +19,19 @@ elif [ "$1" == "-g" ]; then
     git push
     echo "Changes pushed to remote repository"
 elif [ "$1" == "-f" ]; then
-    cd frontend
+    cd $base_dir/frontend
     npm run dev
     cd ..
 elif [ "$1" == "-fire" ]; then
-    cd frontend
+    cd $base_dir/frontend
     npm run build
     firebase deploy
 elif [ "$1" == "-b" ]; then
-    cd backend
+    cd $base_dir/backend
     uvicorn main:app --reload --host 0.0.0.0 --port 8080
     cd ..
 elif [ "$1" == "-lint" ]; then
-    cd frontend
+    cd $base_dir/frontend
     npx prettier --write .
     cd ..
 else
