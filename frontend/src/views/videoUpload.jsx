@@ -1,7 +1,13 @@
 import { useDispatch } from "react-redux";
 import { setBannerThunk } from "../redux/slices/videoSlice";
 import { useRef, useState, useEffect, useCallback, useMemo } from "react";
-import { CircleX, RotateCcw, CirclePlay, CircleStop } from "lucide-react";
+import {
+  CircleX,
+  RotateCcw,
+  CirclePlay,
+  CircleStop,
+  MessageCircleQuestionMark,
+} from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import JSZip from "jszip";
@@ -401,7 +407,7 @@ function VideoUpload() {
                   onClick={handleRecordVideo}
                   className="absolute mt-2 mr-2 top-10 right-0"
                 >
-                  <RotateCcw className="w-8 h-8 text-white bg-orange-500 hover:bg-orange-700 rounded-lg p-1" />
+                  <RotateCcw className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1" />
                 </div>
               )}
             </div>
@@ -471,7 +477,7 @@ function VideoUpload() {
         )}
 
         {recordVideo && (
-          <div className="mt-4 relative mx-auto bg-black border-2 border-gray-300 rounded-lg overflow-hidden">
+          <div className="mt-4 relative mx-auto bg-black border-2 border-gray-300 rounded-lg overflow-hidden w-150">
             {cameraLoading ? (
               <div
                 className="w-150 h-fit bg-gray-800 flex items-center justify-center"
@@ -490,7 +496,7 @@ function VideoUpload() {
                   playsInline
                   muted
                   className="w-full h-fit object-contain bg-gray-800"
-                  style={{ minHeight: "300px" }}
+                  style={{ minHeight: "300px", transform: "scaleX(-1)" }}
                 />
                 {recording && (
                   <div className="absolute top-4 left-4 bg-red-500 text-white px-3 py-1 rounded-full flex items-center gap-2">
@@ -500,20 +506,21 @@ function VideoUpload() {
                 )}
               </div>
             )}
-            <div
-              onClick={resetVideoState}
-              className="absolute mt-2 mr-2 top-0 right-0"
-            >
-              <CircleX className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1" />
-            </div>
-            <div
-              onClick={recording ? handleStopRecording : handleStartRecording}
-              className="absolute top-12 right-2"
-            >
+            <div className="absolute top-2 right-2 flex flex-col gap-2">
+              <div onClick={resetVideoState} className="top-0 right-0">
+                <CircleX className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1" />
+              </div>
+              <MessageCircleQuestionMark className="w-8 h-8 text-white bg-blue-500 hover:bg-blue-700 rounded-lg p-1" />
               {recording ? (
-                <CircleStop className="w-8 h-8 text-white bg-red-500 hover:bg-red-700 rounded-lg p-1" />
+                <CircleStop
+                  onClick={handleStopRecording}
+                  className="w-8 h-8 text-white bg-red-500 hover:bg-red-700 rounded-lg p-1"
+                />
               ) : (
-                <CirclePlay className="w-8 h-8 text-white bg-green-500 hover:bg-green-700 rounded-lg p-1" />
+                <CirclePlay
+                  onClick={handleStartRecording}
+                  className="w-8 h-8 text-white bg-green-500 hover:bg-green-700 rounded-lg p-1"
+                />
               )}
             </div>
           </div>
