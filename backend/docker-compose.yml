@@ -1,16 +1,17 @@
-# cloudbuild.yaml
-steps:
-  - name: gcr.io/kaniko-project/executor:latest
-    args:
-      [
-        '--context=.',
-        '--dockerfile=Dockerfile',
-        '--destination=gcr.io/$PROJECT_ID/backend:latest',
-        '--destination=gcr.io/$PROJECT_ID/backend:${SHORT_SHA}',
-        '--cache=true',
-        '--cache-ttl=168h'
-        # optionally: '--cache-repo=gcr.io/$PROJECT_ID/backend-cache'
-      ]
-images:
-  - 'gcr.io/$PROJECT_ID/backend:latest'
-  - 'gcr.io/$PROJECT_ID/backend:${SHORT_SHA}'
+services:
+  app:
+    build: .
+    container_name: hireview-backend
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app
+    command: >
+      uvicorn main:app --host 0.0.0.0 --port 8080 --reload --no-access-log --log-level info
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - FACE_MESH_EVERY=2
+      - EMOTION_EVERY=10
+      - NUM_WORKERS=4

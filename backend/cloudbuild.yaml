@@ -1,6 +1,16 @@
+# cloudbuild.yaml
 steps:
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/hireview-prep-250822/backend', '.']
-
+  - name: gcr.io/kaniko-project/executor:latest
+    args:
+      [
+        '--context=.',
+        '--dockerfile=Dockerfile',
+        '--destination=gcr.io/$PROJECT_ID/backend:latest',
+        '--destination=gcr.io/$PROJECT_ID/backend:${SHORT_SHA}',
+        '--cache=true',
+        '--cache-ttl=168h'
+        # optionally: '--cache-repo=gcr.io/$PROJECT_ID/backend-cache'
+      ]
 images:
-  - 'gcr.io/hireview-prep-250822/backend'
+  - 'gcr.io/$PROJECT_ID/backend:latest'
+  - 'gcr.io/$PROJECT_ID/backend:${SHORT_SHA}'
