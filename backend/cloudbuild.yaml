@@ -5,27 +5,19 @@ steps:
         "--context=.",
         "--dockerfile=Dockerfile",
         "--destination=gcr.io/$PROJECT_ID/backend:latest",
-        "--destination=gcr.io/$PROJECT_ID/backend:${SHORT_SHA}",
         "--cache=true",
         "--cache-ttl=168h"
       ]
-
-# Define available substitutions
-substitutions:
-  _REGION: us-central1
-  _SERVICE_NAME: backend
 
 # Build options
 options:
   logging: CLOUD_LOGGING_ONLY
   machineType: E2_HIGHCPU_8
   diskSizeGb: 100
-  timeout: 1800s
 
 # Built images
 images:
   - gcr.io/$PROJECT_ID/backend:latest
-  - gcr.io/$PROJECT_ID/backend:${SHORT_SHA}
 
 # Optional: Add tags for better organization
 tags:
