@@ -1,13 +1,7 @@
 import { useDispatch } from "react-redux";
 import { setBannerThunk } from "../redux/slices/videoSlice";
 import { useRef, useState, useEffect, useCallback, useMemo } from "react";
-import {
-  CircleX,
-  RotateCcw,
-  CirclePlay,
-  CircleStop,
-  MessageCircleQuestionMark,
-} from "lucide-react";
+import { CircleX, RotateCcw, CirclePlay, CircleStop } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import JSZip from "jszip";
@@ -33,6 +27,7 @@ function VideoUpload() {
   const [processedVideoUrl, setProcessedVideoUrl] = useState(null);
   const [expressionStats, setExpressionStats] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [question, setQuestion] = useState(null);
   const videoIdRef = useRef(uuidv4());
   const videoId = videoIdRef.current;
   const [progress, setProgress] = useState({
@@ -343,6 +338,13 @@ function VideoUpload() {
     };
   }, [processedVideoUrl, selectedFile]);
 
+  const handleGenerateQuestion = () => {
+    setQuestion("Hello this is a question");
+    setTimeout(() => {
+      setQuestion(null);
+    }, 5000);
+  };
+
   return (
     <div className="flex flex-col items-center">
       <h1 className="text-3xl font-bold mb-8 text-gray-800">
@@ -533,6 +535,17 @@ function VideoUpload() {
                     REC
                   </div>
                 )}
+                {question && (
+                  <div className="absolute bg-black/80 text-white px-3 py-2 rounded-lg left-4 right-4 bottom-16 text-left">
+                    {question}
+                  </div>
+                )}
+                <button
+                  className="absolute left-4 right-4 bottom-4 text-center bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white px-3 py-2 rounded-lg"
+                  onClick={handleGenerateQuestion}
+                >
+                  Generate Question
+                </button>
               </div>
             )}
             <div className="absolute top-2 right-2 flex flex-col gap-2">
