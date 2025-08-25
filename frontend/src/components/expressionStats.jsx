@@ -1,6 +1,7 @@
 import Plot from "react-plotly.js";
+import SectionTitle from "./sectionTitle";
 
-const ExpressionStats = ({ expressionStats }) => {
+const ExpressionStats = ({ expressionStats, title }) => {
   // Transform the data for Plotly
   const emotions = Object.keys(expressionStats || {}).map(
     (emotion) => emotion.charAt(0).toUpperCase() + emotion.slice(1),
@@ -103,14 +104,22 @@ const ExpressionStats = ({ expressionStats }) => {
   };
 
   return (
-    <div className="w-full p-1">
-      {expressionStats && Object.keys(expressionStats).length > 0 ? (
-        <Plot data={data} layout={layout} config={config} className="w-full" />
-      ) : (
-        <div className="text-center text-gray-500 py-8">
-          No expression data available
-        </div>
-      )}
+    <div className="w-full">
+      <SectionTitle title={title} />
+      <div className="w-full p-1">
+        {expressionStats && Object.keys(expressionStats).length > 0 ? (
+          <Plot
+            data={data}
+            layout={layout}
+            config={config}
+            className="w-full"
+          />
+        ) : (
+          <div className="text-center text-gray-500 py-8">
+            No expression data available
+          </div>
+        )}
+      </div>
     </div>
   );
 };

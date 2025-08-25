@@ -1,15 +1,13 @@
 import { useDispatch } from "react-redux";
 import { setBannerThunk } from "../redux/slices/videoSlice";
 import { useRef, useState, useEffect, useCallback, useMemo } from "react";
-import { CircleX, RotateCcw } from "lucide-react";
+import { CircleX, RotateCcw, CirclePlay, CircleStop } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import JSZip from "jszip";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { API_URL } from "../../api";
 import ExpressionStats from "../components/expressionStats";
-import SectionTitle from "../components/sectionTitle";
+import TranscriptAnalysis from "../components/transcriptAnalysis";
 
 function VideoUpload() {
   const dispatch = useDispatch();
@@ -337,7 +335,7 @@ function VideoUpload() {
       <h1 className="text-3xl font-bold mb-8 text-gray-800">
         Upload Your Video
       </h1>
-      <div className="bg-white p-8 rounded-lg shadow-lg border-2 border-dashed border-gray-300 hover:border-[var(--pink-500)] transition-colors">
+      <div className="flex flex-col justify-center items-center bg-white p-8 rounded-lg shadow-lg border-2 border-dashed border-gray-300 hover:border-[var(--pink-500)] transition-colors">
         <div className="text-center w-160 mx-auto">
           <div className="mb-4">
             <svg
@@ -382,12 +380,12 @@ function VideoUpload() {
         </div>
 
         {selectedFile && (
-          <div className="flex flex-col items-center gap-4">
-            <div className="mt-4 relative bg-black border-2 border-gray-300 flex justify-center items-center rounded-lg px-6">
+          <div className="flex w-150 flex-col justify-center items-center gap-4">
+            <div className="mt-4 relative bg-black border-2 border-gray-300 flex justify-center items-center rounded-lg overflow-hidden">
               <video
                 key={videoUrl}
                 controls
-                className="min-w-[170] max-h-96 shadow-md"
+                className="w-full h-fit shadow-md"
                 src={videoUrl}
               />
               {!processedVideoUrl && !analyzing && (
@@ -403,35 +401,22 @@ function VideoUpload() {
                   onClick={handleRecordVideo}
                   className="absolute mt-2 mr-2 top-10 right-0"
                 >
-                  <RotateCcw className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1" />
+                  <RotateCcw className="w-8 h-8 text-white bg-orange-500 hover:bg-orange-700 rounded-lg p-1" />
                 </div>
               )}
             </div>
-            <div className="w-160 flex flex-col gap-4 justify-center px-10">
+            <div className="w-150 flex flex-col gap-4 justify-center">
               {expressionStats && (
-                <div className="w-full">
-                  <SectionTitle title="Expression Analysis" />
-                  <ExpressionStats expressionStats={expressionStats} />
-                </div>
+                <ExpressionStats
+                  expressionStats={expressionStats}
+                  title="Expression Analysis"
+                />
               )}
               {transcriptAnalysis && (
-                <div className="w-full flex flex-col justify-center">
-                  <SectionTitle title="Transcript Analysis" />
-                  <div className="prose prose-pink max-w-none">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        p: ({ children, ...props }) => (
-                          <p className="mb-4" {...props}>
-                            {children}
-                          </p>
-                        ),
-                      }}
-                    >
-                      {transcriptAnalysis}
-                    </ReactMarkdown>
-                  </div>
-                </div>
+                <TranscriptAnalysis
+                  transcriptAnalysis={transcriptAnalysis}
+                  title="Transcript Analysis"
+                />
               )}
               <div className="w-full my-4">
                 {!processedVideoUrl &&
@@ -486,14 +471,14 @@ function VideoUpload() {
         )}
 
         {recordVideo && (
-          <div className="mt-4 relative bg-black border-2 border-gray-300 rounded-lg">
+          <div className="mt-4 relative mx-auto bg-black border-2 border-gray-300 rounded-lg overflow-hidden">
             {cameraLoading ? (
               <div
-                className="w-full max-h-96 bg-gray-800 flex items-center justify-center"
+                className="w-150 h-fit bg-gray-800 flex items-center justify-center"
                 style={{ minHeight: "300px" }}
               >
                 <div className="text-white text-center">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white mx-auto mb-2" />
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mx-auto mb-2" />
                   <p>Accessing camera...</p>
                 </div>
               </div>
@@ -504,7 +489,7 @@ function VideoUpload() {
                   autoPlay
                   playsInline
                   muted
-                  className="w-full max-h-96 object-contain bg-gray-800"
+                  className="w-full h-fit object-contain bg-gray-800"
                   style={{ minHeight: "300px" }}
                 />
                 {recording && (
@@ -521,12 +506,16 @@ function VideoUpload() {
             >
               <CircleX className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1" />
             </div>
-            <button
+            <div
               onClick={recording ? handleStopRecording : handleStartRecording}
-              className="absolute bottom-4 left-4 bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200 shadow-lg hover:shadow-xl z-10"
+              className="absolute top-12 right-2"
             >
-              {recording ? "Stop" : "Start"}
-            </button>
+              {recording ? (
+                <CircleStop className="w-8 h-8 text-white bg-red-500 hover:bg-red-700 rounded-lg p-1" />
+              ) : (
+                <CirclePlay className="w-8 h-8 text-white bg-green-500 hover:bg-green-700 rounded-lg p-1" />
+              )}
+            </div>
           </div>
         )}
       </div>
