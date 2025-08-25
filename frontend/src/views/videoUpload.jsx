@@ -28,6 +28,7 @@ function VideoUpload() {
   const [expressionStats, setExpressionStats] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [question, setQuestion] = useState(null);
+  const [seconds, setSeconds] = useState(5);
   const videoIdRef = useRef(uuidv4());
   const videoId = videoIdRef.current;
   const [progress, setProgress] = useState({
@@ -342,8 +343,18 @@ function VideoUpload() {
     setQuestion("Hello this is a question");
     setTimeout(() => {
       setQuestion(null);
-    }, 5000);
+    }, seconds * 1000);
   };
+
+  useEffect(() => {
+    if (question) {
+      const interval = setInterval(() => {
+        setSeconds((prev) => prev - 1);
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+    setSeconds(5);
+  }, [question]);
 
   return (
     <div className="flex flex-col items-center">
@@ -536,8 +547,9 @@ function VideoUpload() {
                   </div>
                 )}
                 {question && (
-                  <div className="absolute bg-black/80 text-white px-3 py-2 rounded-lg left-4 right-4 bottom-16 text-left">
-                    {question}
+                  <div className="absolute justify-between flex gap-2 bg-black/80 text-white px-3 py-2 rounded-lg left-4 right-4 bottom-16 text-left">
+                    <p className="text-sm text-left">{question}</p>
+                    <p className="text-sm text-left">{seconds} seconds</p>
                   </div>
                 )}
                 <button
