@@ -10,14 +10,13 @@ substitutions:
 steps:
   - name: gcr.io/kaniko-project/executor:latest
     args:
-      - "--dockerfile=backend/Dockerfile"
-      - "--context=dir://."
+      - "--context=dir://backend"
+      - "--dockerfile=Dockerfile"
       - "--destination=${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${REPO_NAME}/${_SERVICE_NAME}:$COMMIT_SHA"
       - "--destination=${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${REPO_NAME}/${_SERVICE_NAME}:latest"
       - "--cache=true"
       - "--cache-ttl=48h"
       - "--cache-repo=${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${REPO_NAME}/${_SERVICE_NAME}-cache"
-      - "--verbosity=info"
 
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
     entrypoint: gcloud
