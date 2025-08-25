@@ -183,10 +183,6 @@ function VideoUpload() {
       recorder = new MediaRecorder(mediaStream);
     }
 
-    console.log("Recorder mimeType:", recorder.mimeType);
-    const [videoTrack] = mediaStream.getVideoTracks();
-    console.log("Actual cam settings:", videoTrack.getSettings());
-
     mediaRecorderRef.current = recorder;
     const chunks = [];
 
