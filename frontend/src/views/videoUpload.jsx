@@ -196,12 +196,6 @@ function VideoUpload() {
     setRecording(true);
   };
 
-  useEffect(() => {
-    if (expressionStats) {
-      console.log(expressionStats);
-    }
-  }, [expressionStats]);
-
   const handleStopRecording = () => {
     if (mediaRecorderRef.current && recording) {
       mediaRecorderRef.current.stop();
@@ -224,9 +218,7 @@ function VideoUpload() {
     const eventSource = new EventSource(`${API_URL}/video/stream/${videoId}`);
 
     eventSource.onmessage = (event) => {
-      console.log("Stream update:", event.data);
       const data = JSON.parse(event.data);
-      // Add a small delay to make progress updates smoother
       setTimeout(
         () => setProgress({ progress: data.progress, state: data.state }),
         100,

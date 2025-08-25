@@ -739,6 +739,9 @@ def transcribe_audio(audio_path: str, cancel_event: Event) -> str:
         )
     return (transcript.text or "").strip()
 
+class SpokenContentAnalysis(BaseModel):
+    analysis: str = Field(description="The analysis of the spoken content")
+
 def analyze_spoken_content(audio_path: str, job_description: str, analysis_path: str, cancel_event: Event) -> None:
     spoken_content_analysis = "No audio stream found."
     try:
@@ -751,16 +754,17 @@ def analyze_spoken_content(audio_path: str, job_description: str, analysis_path:
             else:
                 if cancel_event.is_set():
                     return
-                resp = client.chat.completions.create(
+
+                response = client.responses.parse(
                     model="gpt-4o-mini",
-                    messages=[
+                    input=[
                         {"role": "system",
                         "content": f"You are a career coach. Analyze the following interview answer and give concise, actionable feedback. The job description is: {job_description}"},
                         {"role": "user", "content": transcript},
                     ],
-                    temperature=0.2,
+                    text_format=SpokenContentAnalysis,
                 )
-                spoken_content_analysis = resp.choices[0].message.content
+                spoken_content_analysis = response.output_parsed.analysis
     except Exception as e:
         logger.warning(f"Spoken content analysis skipped: {e}")
         spoken_content_analysis = "Analysis unavailable."
