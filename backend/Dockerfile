@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bullseye
+FROM python:3.11.9-slim-bullseye@sha256:fe8df05de0fe659668a0b6fa204c652092e3e96832a9c7d6f8cc1e0e03e663d8
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -21,9 +21,9 @@ WORKDIR /app
 # 1) Copy only requirements for a stable, cacheable deps layer
 COPY requirements.txt /app/requirements.txt
 
-# 2) Install Python deps
-RUN python -m pip install --upgrade pip \
- && pip install --no-cache-dir -r /app/requirements.txt
+# 2) Install Python deps with pinned pip version for stable layer digest
+RUN python -m pip install --upgrade "pip==25.2"
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # 3) (Important) Pre-download HF model *before* app code so code edits don't invalidate this cache
 RUN python - <<'PY'
