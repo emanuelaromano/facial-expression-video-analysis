@@ -15,6 +15,7 @@ function VideoUpload() {
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const analysisAbortRef = useRef(null);
+  const questionAllowedSeconds = 5;
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [recordVideo, setRecordVideo] = useState(false);
@@ -23,12 +24,13 @@ function VideoUpload() {
   const [mediaStream, setMediaStream] = useState(null);
   const [wasRecorded, setWasRecorded] = useState(false);
   const [transcriptAnalysis, setTranscriptAnalysis] = useState(null);
-  const [tooltip, setTooltip] = useState(null);
   const [processedVideoUrl, setProcessedVideoUrl] = useState(null);
   const [expressionStats, setExpressionStats] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [question, setQuestion] = useState(null);
   const [seconds, setSeconds] = useState(5);
+  const questionTimeoutRef = useRef(null);
+  const questionIntervalRef = useRef(null);
   const videoIdRef = useRef(uuidv4());
   const videoId = videoIdRef.current;
   const [progress, setProgress] = useState({
@@ -340,21 +342,36 @@ function VideoUpload() {
   }, [processedVideoUrl, selectedFile]);
 
   const handleGenerateQuestion = () => {
+    if (questionTimeoutRef.current) {
+      clearTimeout(questionTimeoutRef.current);
+    }
+    if (questionIntervalRef.current) {
+      clearInterval(questionIntervalRef.current);
+    }
     setQuestion("Hello this is a question");
-    setTimeout(() => {
+    setSeconds(questionAllowedSeconds);
+    questionIntervalRef.current = setInterval(() => {
+      setSeconds((prev) => prev - 1);
+    }, 1000);
+    questionTimeoutRef.current = setTimeout(() => {
       setQuestion(null);
-    }, seconds * 1000);
+      if (questionIntervalRef.current) {
+        clearInterval(questionIntervalRef.current);
+      }
+    }, questionAllowedSeconds * 1000);
   };
 
   useEffect(() => {
-    if (question) {
-      const interval = setInterval(() => {
-        setSeconds((prev) => prev - 1);
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-    setSeconds(5);
-  }, [question]);
+    // Cleanup on unmount
+    return () => {
+      if (questionTimeoutRef.current) {
+        clearTimeout(questionTimeoutRef.current);
+      }
+      if (questionIntervalRef.current) {
+        clearInterval(questionIntervalRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="flex flex-col items-center">
@@ -415,37 +432,23 @@ function VideoUpload() {
               />
               {!processedVideoUrl && !analyzing && (
                 <div className="absolute top-2 right-2 flex flex-col gap-2">
-                  <div className="flex relative">
+                  <div className="relative flex group">
                     <CircleX
                       onClick={resetVideoState}
-                      onMouseEnter={() => setTooltip("close")}
-                      onMouseLeave={() => setTooltip(null)}
                       className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1"
                     />
-                    <p
-                      className={`bg-black/50 transition-all duration-50 p-2 py-1 rounded-lg text-white text-sm absolute top-[50%] translate-y-[-50%] right-[100%] mr-2 whitespace-nowrap ${
-                        tooltip === "close" ? "opacity-100" : "opacity-0"
-                      }`}
-                    >
+                    <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-lg text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
                       Close
                     </p>
                   </div>
 
                   {wasRecorded && (
-                    <div className="flex relative">
+                    <div className="relative flex group">
                       <RotateCcw
-                        onMouseEnter={() => setTooltip("record-again")}
-                        onMouseLeave={() => setTooltip(null)}
                         onClick={handleRecordVideo}
                         className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1"
                       />
-                      <p
-                        className={`bg-black/50 transition-all duration-50 p-2 py-1 rounded-lg text-white text-sm absolute top-[50%] translate-y-[-50%] right-[100%] mr-2 whitespace-nowrap ${
-                          tooltip === "record-again"
-                            ? "opacity-100"
-                            : "opacity-0"
-                        }`}
-                      >
+                      <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-lg text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
                         Record Again
                       </p>
                     </div>
@@ -546,67 +549,51 @@ function VideoUpload() {
                     REC
                   </div>
                 )}
-                {question && (
+                {question && !recording && (
                   <div className="absolute justify-between flex gap-2 bg-black/80 text-white px-3 py-2 rounded-lg left-4 right-4 bottom-16 text-left">
                     <p className="text-sm text-left">{question}</p>
                     <p className="text-sm text-left">{seconds} seconds</p>
                   </div>
                 )}
-                <button
-                  className="absolute left-4 right-4 bottom-4 text-center bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white px-3 py-2 rounded-lg"
-                  onClick={handleGenerateQuestion}
-                >
-                  Generate Question
-                </button>
+                {!recording && (
+                  <div className="absolute left-4 right-4 bottom-4 flex flex-row gap-4 items-center">
+                    <button
+                      className="w-full flex-1 text-center bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white px-3 py-2 rounded-lg"
+                      onClick={handleGenerateQuestion}
+                    >
+                      Generate Question
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             <div className="absolute top-2 right-2 flex flex-col gap-2">
-              <div className="flex relative">
+              <div className="relative flex group">
                 <CircleX
-                  onMouseEnter={() => setTooltip("close")}
-                  onMouseLeave={() => setTooltip(null)}
                   onClick={resetVideoState}
                   className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1"
                 />
-                <p
-                  className={`bg-black/50 transition-all duration-50 p-2 py-1 rounded-lg text-white text-sm absolute top-[50%] translate-y-[-50%] right-[100%] mr-2 ${
-                    tooltip === "close" ? "opacity-100" : "opacity-0"
-                  }`}
-                >
+                <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-lg text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100">
                   Close
                 </p>
               </div>
               {recording ? (
-                <div className="flex relative">
+                <div className="relative flex group">
                   <CircleStop
-                    onMouseEnter={() => setTooltip("stop-recording")}
-                    onMouseLeave={() => setTooltip(null)}
                     onClick={handleStopRecording}
                     className="w-8 h-8 text-white bg-red-500 hover:bg-red-700 rounded-lg p-1"
                   />
-                  <p
-                    className={`bg-black/50 transition-all duration-50 p-2 py-1 rounded-lg text-white text-sm absolute top-[50%] translate-y-[-50%] right-[100%] mr-2 whitespace-nowrap ${
-                      tooltip === "stop-recording" ? "opacity-100" : "opacity-0"
-                    }`}
-                  >
+                  <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-lg text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
                     Stop
                   </p>
                 </div>
               ) : (
-                <div className="flex relative">
+                <div className="relative flex group">
                   <CirclePlay
-                    onMouseEnter={() => setTooltip("start-recording")}
-                    onMouseLeave={() => setTooltip(null)}
                     onClick={handleStartRecording}
                     className="w-8 h-8 text-white bg-green-500 hover:bg-green-700 rounded-lg p-1"
                   />
-                  <p
-                    className={`bg-black/50 transition-all duration-50 p-2 py-1 rounded-lg text-white text-sm absolute top-[50%] translate-y-[-50%] right-[100%] mr-2 whitespace-nowrap ${
-                      tooltip === "start-recording"
-                        ? "opacity-100"
-                        : "opacity-0"
-                    }`}
-                  >
+                  <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-lg text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
                     Play
                   </p>
                 </div>
