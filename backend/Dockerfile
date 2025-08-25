@@ -23,6 +23,7 @@ COPY requirements.txt /app/requirements.txt
 
 # 2) Install Python deps with pinned pip version for stable layer digest
 RUN python -m pip install --upgrade "pip==25.2"
+RUN pip install triton
 RUN pip install --no-cache-dir --require-hashes -r /app/requirements.txt
 
 # 3) (Important) Pre-download HF model *before* app code so code edits don't invalidate this cache
