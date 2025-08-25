@@ -19,6 +19,7 @@ steps:
       - "--cache-repo=${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${REPO_NAME}/${_SERVICE_NAME}-cache"
       - "--snapshotMode=redo"
       - "--use-new-run"
+      - "--cache-copy-layers"
 
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
     entrypoint: gcloud
