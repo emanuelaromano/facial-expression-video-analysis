@@ -17,6 +17,7 @@ function VideoUpload() {
   const analysisAbortRef = useRef(null);
   const questionAllowedSeconds = 5;
 
+  const [jobDescription, _] = useState("Data Engineer");
   const [selectedFile, setSelectedFile] = useState(null);
   const [recordVideo, setRecordVideo] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -31,6 +32,7 @@ function VideoUpload() {
   const [seconds, setSeconds] = useState(5);
   const questionTimeoutRef = useRef(null);
   const questionIntervalRef = useRef(null);
+  const [generatingQuestion, setGeneratingQuestion] = useState(false);
   const videoIdRef = useRef(uuidv4());
   const videoId = videoIdRef.current;
   const [progress, setProgress] = useState({
@@ -243,7 +245,7 @@ function VideoUpload() {
       const formData = new FormData();
       formData.append("uuid", videoId);
       formData.append("original_video", selectedFile);
-
+      formData.append("job_description", jobDescription);
       // Expect a ZIP back (binary)
       const response = await axios.post(`${API_URL}/video/analyze`, formData, {
         headers: {
@@ -300,7 +302,7 @@ function VideoUpload() {
       // Close the EventSource
       eventSource.close();
     }
-  }, [selectedFile, videoId, dispatch]);
+  }, [selectedFile, videoId, dispatch, jobDescription]);
 
   useEffect(() => {
     if (mediaStream && videoRef.current) {
@@ -341,15 +343,33 @@ function VideoUpload() {
     };
   }, [processedVideoUrl, selectedFile]);
 
-  const handleGenerateQuestion = () => {
+  const handleGenerateQuestion = async () => {
+    setGeneratingQuestion(true);
     if (questionTimeoutRef.current) {
       clearTimeout(questionTimeoutRef.current);
     }
     if (questionIntervalRef.current) {
       clearInterval(questionIntervalRef.current);
     }
-    setQuestion("Hello this is a question");
-    setSeconds(questionAllowedSeconds);
+    const formData = new FormData();
+    formData.append("job_description", jobDescription);
+    try {
+      const response = await axios.post(`${API_URL}/video/question`, formData);
+      if (
+        response.status < 200 ||
+        response.status >= 300 ||
+        !response.data.question
+      ) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+      const question = response.data.question;
+      setQuestion(question);
+      setSeconds(questionAllowedSeconds);
+    } catch (err) {
+      console.error("Failed to generate question:", err);
+      dispatch(setBannerThunk("Failed to generate question", "error"));
+      return;
+    }
     questionIntervalRef.current = setInterval(() => {
       setSeconds((prev) => prev - 1);
     }, 1000);
@@ -358,7 +378,9 @@ function VideoUpload() {
       if (questionIntervalRef.current) {
         clearInterval(questionIntervalRef.current);
       }
+      handleStartRecording();
     }, questionAllowedSeconds * 1000);
+    setGeneratingQuestion(false);
   };
 
   useEffect(() => {
@@ -550,18 +572,23 @@ function VideoUpload() {
                   </div>
                 )}
                 {question && !recording && (
-                  <div className="absolute justify-between flex gap-2 bg-black/80 text-white px-3 py-2 rounded-lg left-4 right-4 bottom-16 text-left">
+                  <div className="absolute justify-between items-center flex gap-2 bg-black/80 text-white px-3 py-2 rounded-lg left-4 right-4 bottom-16 text-left">
                     <p className="text-sm text-left">{question}</p>
-                    <p className="text-sm text-left">{seconds} seconds</p>
+                    <p className="text-sm border-l-2 border-white pl-2 min-w-20 self-stretch flex items-center justify-center">
+                      {seconds}s
+                    </p>
                   </div>
                 )}
                 {!recording && (
                   <div className="absolute left-4 right-4 bottom-4 flex flex-row gap-4 items-center">
                     <button
-                      className="w-full flex-1 text-center bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white px-3 py-2 rounded-lg"
+                      className={`w-full flex-1 text-center bg-[var(--pink-500)] text-white px-3 py-2 rounded-lg ${generatingQuestion ? "opacity-80" : "hover:bg-[var(--pink-700)]"}`}
                       onClick={handleGenerateQuestion}
+                      disabled={generatingQuestion}
                     >
-                      Generate Question
+                      {generatingQuestion
+                        ? "Generating..."
+                        : "Generate New Question"}
                     </button>
                   </div>
                 )}

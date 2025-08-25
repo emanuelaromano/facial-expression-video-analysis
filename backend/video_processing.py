@@ -21,6 +21,7 @@ import asyncio
 from subprocess import Popen, PIPE
 import time
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 load_dotenv()
 
@@ -173,7 +174,7 @@ async def analyze_video(
     background_tasks: BackgroundTasks,
     uuid: str = Form(...),
     original_video: UploadFile = File(...),
-    job_description: Optional[str] = Form("Data Engineer"),
+    job_description: str = Form(...),
 ):
     initialize_status(uuid)
     cancel_event = Event()
@@ -365,6 +366,17 @@ async def analyze_video(
         # Best effort: if a partially created bundle exists, return a 500 instead of streaming it
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
 
+
+@router.post("/question", status_code=HTTPStatus.OK)
+async def generate_interview_question(job_description: str = Form(...)):
+    try:
+        question = generate_question(job_description)
+        return {
+            "question": question
+        }
+    except Exception as e:
+        logger.exception("unexpected error in generate_interview_question")
+        raise Exception(f"Unexpected error: {e}")
 
 ########################################################
 # Video processing functions
@@ -771,6 +783,10 @@ def normalize_expression_stats(expression_stats: dict) -> dict:
         normalized_expression_stats["other"] = other_count
     return normalized_expression_stats
 
+########################################################
+# Delayed cleanup functions
+########################################################
+
 def delayed_rmtree(path: str, delay_seconds: int = 30):
     time.sleep(delay_seconds)
     shutil.rmtree(path, ignore_errors=True)
@@ -780,4 +796,28 @@ def delayed_cleanup_status(uuid: str, delay_seconds: int = 60):
     time.sleep(delay_seconds)
     cleanup_status(uuid)
     logger.info(f"Cleaned up status for {uuid}")
+
+########################################################
+# Generate question functions
+########################################################
+
+class QuestionResponse(BaseModel):
+    question: str = Field(description="The interview question")
+
+def generate_question(job_description: str) -> str:
+    response = client.responses.parse(
+        model="gpt-4o-mini",
+        input=[
+            {
+                "role": "system",
+                "content": f"You are a career coach. Generate a possible interview question for the following job description: {job_description}",
+            },
+        ],
+        text_format=QuestionResponse,
+    )
+    return response.output_parsed.question
+
+
+
+
 
