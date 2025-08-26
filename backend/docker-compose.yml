@@ -1,6 +1,8 @@
 services:
   app:
     container_name: hireview-backend
+    ports:
+      - "8080:8080"
     build:
       context: .
       dockerfile: Dockerfile
@@ -13,4 +15,6 @@ services:
       - FACE_MESH_EVERY=2
       - EMOTION_EVERY=10
       - NUM_WORKERS=4
+      - PORT=8080
     platform: linux/amd64
+    command: uvicorn main:app --host 0.0.0.0 --port 8080 --reload

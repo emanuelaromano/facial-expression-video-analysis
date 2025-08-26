@@ -1,0 +1,22 @@
+substitutions:
+  _REGION: us-central1
+  _REPO: cloud-run-source-deploy
+  _IMAGE: backend-app
+  _TAG: latest
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+      - BUILDKIT_PROGRESS=plain
+    args:
+      [
+        "build",
+        "--no-cache",
+        "--platform=linux/amd64",
+        "-t","${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:${_TAG}",
+        "."
+      ]
+
+images:
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:${_TAG}"

@@ -22,16 +22,15 @@ from subprocess import Popen, PIPE
 import time
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+import glob
 
 load_dotenv()
 
 # Configure temp directory for Cloud Run compatibility
 TEMP_ROOT = os.getenv("TEMP_ROOT", "/tmp")
 TEMP_BASE = os.path.join(TEMP_ROOT, "hireview")
-os.makedirs(TEMP_BASE, exist_ok=True)
-
-# Delete our temp subtree at startup
 shutil.rmtree(TEMP_BASE, ignore_errors=True)
+os.makedirs(TEMP_BASE, exist_ok=True)
 
 router = APIRouter()
 
@@ -47,6 +46,13 @@ if not logger.handlers:
     logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
+
+# Validate model presence at startup
+MODEL_DIR = "/opt/models/vit-fer"
+model_files = [p for p in glob.glob(MODEL_DIR + "/**/*", recursive=True) if os.path.isfile(p)]
+if len(model_files) < 3:
+    raise RuntimeError(f"Model dir looks empty: {MODEL_DIR} (found {len(model_files)} files)")
+logger.info(f"Model files present: {len(model_files)}")
 
 ########################################################
 # Utility functions
@@ -80,28 +86,14 @@ fd_lock = Lock()
 
 # Emotion analysis
 try:
-    logger.info("Loading emotion analysis model...")
     emotion_processor = AutoImageProcessor.from_pretrained(
         "/opt/models/vit-fer",
         local_files_only=True
     )
     emotion_model = AutoModelForImageClassification.from_pretrained("/opt/models/vit-fer").eval()
     EMOTION_ID2LABEL = emotion_model.config.id2label
-    logger.info("Emotion analysis model loaded successfully")
 except Exception as e:
     logger.error(f"Failed to load emotion analysis model: {e}")
-    logger.error("Model files in /opt/models/vit-fer:")
-    try:
-        import os
-        if os.path.exists("/opt/models/vit-fer"):
-            for root, dirs, files in os.walk("/opt/models/vit-fer"):
-                for file in files:
-                    logger.error(f"  {os.path.join(root, file)}")
-        else:
-            logger.error("  /opt/models/vit-fer directory does not exist")
-    except Exception as dir_error:
-        logger.error(f"Could not list model directory: {dir_error}")
-    
     # Set fallback values
     emotion_processor = None
     emotion_model = None
