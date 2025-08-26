@@ -1,13 +1,11 @@
 services:
   app:
-    build: .
     container_name: hireview-backend
-    ports:
-      - "8080:8080"
-    volumes:
-      - .:/app
-    command: >
-      uvicorn main:app --host 0.0.0.0 --port 8080 --reload --no-access-log --log-level info
+    build:
+      context: .
+      dockerfile: Dockerfile
+      tags:
+        - us-central1-docker.pkg.dev/hireview-prep-470120/cloud-run-source-deploy/backend-app:latest
     env_file:
       - .env
     environment:
@@ -15,3 +13,4 @@ services:
       - FACE_MESH_EVERY=2
       - EMOTION_EVERY=10
       - NUM_WORKERS=4
+    platform: linux/amd64

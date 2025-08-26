@@ -25,6 +25,14 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
+# Configure temp directory for Cloud Run compatibility
+TEMP_ROOT = os.getenv("TEMP_ROOT", "/tmp")
+TEMP_BASE = os.path.join(TEMP_ROOT, "hireview")
+os.makedirs(TEMP_BASE, exist_ok=True)
+
+# Delete our temp subtree at startup
+shutil.rmtree(TEMP_BASE, ignore_errors=True)
+
 router = APIRouter()
 
 ########################################################
@@ -51,9 +59,6 @@ async def _abort_if_disconnected(request: Request, cancel_event: Event):
         cancel_event.set()
         raise HTTPException(status_code=499, detail="Client Closed Request")
 
-# Delete the temp folder at startup
-shutil.rmtree("temp", ignore_errors=True)
-
 ########################################################
 # Video processing globals
 ########################################################
@@ -61,7 +66,7 @@ shutil.rmtree("temp", ignore_errors=True)
 FACE_MESH_EVERY = int(os.getenv("FACE_MESH_EVERY", "2"))
 EMOTION_EVERY   = int(os.getenv("EMOTION_EVERY", "10"))
 NUM_WORKERS     = int(os.getenv("NUM_WORKERS", "4"))
-OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "sk-proj-1234567890")
 
 # Building the face mesh
 mp_face_mesh = mp.solutions.face_mesh
@@ -74,9 +79,33 @@ face_det = mp_fd.FaceDetection(model_selection=0, min_detection_confidence=0.5)
 fd_lock = Lock()
 
 # Emotion analysis
-emotion_processor = AutoImageProcessor.from_pretrained("mo-thecreator/vit-Facial-Expression-Recognition")
-emotion_model = AutoModelForImageClassification.from_pretrained("mo-thecreator/vit-Facial-Expression-Recognition").eval()
-EMOTION_ID2LABEL = emotion_model.config.id2label
+try:
+    logger.info("Loading emotion analysis model...")
+    emotion_processor = AutoImageProcessor.from_pretrained(
+        "/opt/models/vit-fer",
+        local_files_only=True
+    )
+    emotion_model = AutoModelForImageClassification.from_pretrained("/opt/models/vit-fer").eval()
+    EMOTION_ID2LABEL = emotion_model.config.id2label
+    logger.info("Emotion analysis model loaded successfully")
+except Exception as e:
+    logger.error(f"Failed to load emotion analysis model: {e}")
+    logger.error("Model files in /opt/models/vit-fer:")
+    try:
+        import os
+        if os.path.exists("/opt/models/vit-fer"):
+            for root, dirs, files in os.walk("/opt/models/vit-fer"):
+                for file in files:
+                    logger.error(f"  {os.path.join(root, file)}")
+        else:
+            logger.error("  /opt/models/vit-fer directory does not exist")
+    except Exception as dir_error:
+        logger.error(f"Could not list model directory: {dir_error}")
+    
+    # Set fallback values
+    emotion_processor = None
+    emotion_model = None
+    EMOTION_ID2LABEL = {}
 
 # Transcription client
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -178,7 +207,7 @@ async def analyze_video(
 ):
     initialize_status(uuid)
     cancel_event = Event()
-    temp_dir = f"temp/{uuid}"
+    temp_dir = os.path.join(TEMP_BASE, uuid)
     temp_og_video_path = os.path.join(temp_dir, "video.mp4")
     temp_frames_dir = os.path.join(temp_dir, "frames")
     temp_processed_dir = os.path.join(temp_dir, "processed")
@@ -445,6 +474,11 @@ def detect_face_bbox(bgr):
 
 
 def emotion_analysis(frame_path: str, frame_index: int):
+    # Check if models are loaded
+    if emotion_processor is None or emotion_model is None:
+        logger.warning(f"Emotion analysis models not loaded for frame {frame_index}")
+        return None, None
+    
     bgr = cv2.imread(frame_path)
     if bgr is None:
         logger.warning(f"Frame {frame_index} could not be read for emotion analysis.")
