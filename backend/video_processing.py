@@ -4,7 +4,7 @@ import cv2
 import logging
 import subprocess
 from dotenv import load_dotenv
-from fastapi import APIRouter, File, UploadFile, Form, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, UploadFile, Form, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 from http import HTTPStatus
 from transformers import AutoImageProcessor, AutoModelForImageClassification
@@ -23,13 +23,50 @@ import time
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import glob
+from google.cloud import storage
+from datetime import timedelta
+import google.auth
+from google.auth import impersonated_credentials
 
 load_dotenv()
 
-# Configure temp directory for Cloud Run compatibility
-TEMP_ROOT = os.getenv("TEMP_ROOT", "/tmp")
+########################################################
+# Delayed cleanup functions
+########################################################
+
+async def delayed_rmtree(path: str, delay_seconds: int = 30):
+    await asyncio.sleep(delay_seconds)
+    try:
+        if path == TEMP_BASE:
+            for name in os.listdir(path):
+                p = os.path.join(path, name)
+                if os.path.isfile(p) or os.path.islink(p):
+                    os.unlink(p)
+                elif os.path.isdir(p):
+                    shutil.rmtree(p, ignore_errors=True)
+            logger.info(f"Cleared contents of {path}")
+        else:
+            shutil.rmtree(path, ignore_errors=True)
+            logger.info(f"Deleted directory {path}")
+    except Exception as e:
+        logger.warning(f"Failed to clean up {path}: {e}")
+
+
+async def delayed_cleanup_status(uuid: str, delay_seconds: int = 30):
+    await asyncio.sleep(delay_seconds)
+    cleanup_status(uuid)
+    logger.info(f"Cleaned up status for {uuid}")
+
+########################################################
+# Video processing globals
+########################################################
+
+TEMP_ROOT = os.getenv("TEMP_ROOT", "/mnt/gcs")
 TEMP_BASE = os.path.join(TEMP_ROOT, "hireview")
-shutil.rmtree(TEMP_BASE, ignore_errors=True)
+BUCKET = os.getenv("BUCKET", "backend-app-storage")
+PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "hireview-prep-470120")
+TARGET_SA = os.getenv("TARGET_SERVICE_ACCOUNT", "916307297241-compute@developer.gserviceaccount.com")
+SCOPES = ["https://www.googleapis.com/auth/devstorage.read_write"]
 os.makedirs(TEMP_BASE, exist_ok=True)
 
 router = APIRouter()
@@ -59,10 +96,13 @@ logger.info(f"Model files present: {len(model_files)}")
 ########################################################
 
 # Client disconnect handling
-async def _abort_if_disconnected(request: Request, cancel_event: Event):
-    await asyncio.sleep(0)
+async def _abort_if_disconnected(request: Request, cancel_event: Event, uuid: str):
     if await request.is_disconnected():
         cancel_event.set()
+        path = os.path.join(TEMP_BASE, uuid)
+        if os.path.exists(path):
+            asyncio.create_task(delayed_rmtree(path, 0))
+        asyncio.create_task(asyncio.to_thread(cleanup_status, uuid))
         raise HTTPException(status_code=499, detail="Client Closed Request")
 
 ########################################################
@@ -101,6 +141,21 @@ except Exception as e:
 
 # Transcription client
 client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Storage client setup for both local and cloud
+def get_storage_client():
+    try:
+        source_creds, _ = google.auth.default(scopes=SCOPES)
+        impersonated = impersonated_credentials.Credentials(
+            source_credentials=source_creds,
+            target_principal=TARGET_SA,
+            target_scopes=SCOPES,
+            lifetime=3600,
+        )
+        return storage.Client(project=PROJECT, credentials=impersonated)
+    except Exception as e:
+        logger.error(f"Falling back to default credentials: {e}")
+        return storage.Client()
 
 ########################################################
 # SSE Streaming endpoints
@@ -186,6 +241,23 @@ def stream(uuid: str):
     )
 
 ########################################################
+# Upload video to GCS
+########################################################
+
+@router.get("/upload-url", status_code=HTTPStatus.OK)
+def get_signed_upload_url(uuid: str, filename: str):
+    client = get_storage_client()
+    blob = client.bucket(BUCKET).blob(f"hireview/{uuid}/{filename}")
+    url = blob.generate_signed_url(
+        version="v4",
+        expiration=timedelta(minutes=10),
+        method="PUT",
+        content_type="application/octet-stream",
+    )
+    return {"url": url, "gcs_path": blob.name}
+
+
+########################################################
 # API endpoints
 ########################################################
 
@@ -194,7 +266,7 @@ async def analyze_video(
     request: Request,
     background_tasks: BackgroundTasks,
     uuid: str = Form(...),
-    original_video: UploadFile = File(...),
+    gcs_path: str = Form(...), 
     job_description: str = Form(...),
 ):
     initialize_status(uuid)
@@ -214,23 +286,27 @@ async def analyze_video(
         # Create temp folders
         os.makedirs(temp_frames_dir, exist_ok=True)
         os.makedirs(temp_processed_dir, exist_ok=True)
-        update_status(uuid, "saving video", 5)
+        update_status(uuid, "downloading video", 5)
 
-        # Save video and extract info
-        save_original_video(original_video, temp_og_video_path)
-        await _abort_if_disconnected(request, cancel_event)
+        # Get video from GCS and download to temp location
+        client = get_storage_client()
+        bucket = client.bucket(BUCKET)
+        blob = bucket.blob(gcs_path)
+        blob.download_to_filename(temp_og_video_path)
+        
+        await _abort_if_disconnected(request, cancel_event, uuid)
         
         fps_num, fps_den = get_fps_fraction(temp_og_video_path)
-        await _abort_if_disconnected(request, cancel_event)
+        await _abort_if_disconnected(request, cancel_event, uuid)
         
         update_status(uuid, "extracting audio", 10)
         audio_path = extract_audio_ffmpeg(temp_og_video_path, temp_audio_path, cancel_event)
         if not audio_path:
             logger.warning("Audio extraction failed - video will be silent")
-        await _abort_if_disconnected(request, cancel_event)
+        await _abort_if_disconnected(request, cancel_event, uuid)
         
         num_frames = split_video_into_frames(temp_og_video_path, temp_frames_dir, cancel_event)
-        await _abort_if_disconnected(request, cancel_event)
+        await _abort_if_disconnected(request, cancel_event, uuid)
 
         # Analyze only needed frames
         expressions = {}
@@ -254,7 +330,7 @@ async def analyze_video(
                 # bail out quickly if canceled
                 if cancel_event.is_set():
                     break
-                await _abort_if_disconnected(request, cancel_event)
+                await _abort_if_disconnected(request, cancel_event, uuid)
                 idx = futures[future]
                 result = future.result()
                 expressions[str(idx)] = result or {}
@@ -265,7 +341,7 @@ async def analyze_video(
                     if completed % 10 == 0:
                         logger.info(f"Analyzed {completed}/{len(needed_idxs)} frames ({completed/len(needed_idxs)*100:.1f}%)")
 
-        await _abort_if_disconnected(request, cancel_event)
+        await _abort_if_disconnected(request, cancel_event, uuid)
 
         # Rebuild frames using most recent analyzed indices
         logger.info(f"Starting frame rebuilding process for {num_frames} frames...")
@@ -276,7 +352,7 @@ async def analyze_video(
         for i in range(num_frames):
             if cancel_event.is_set():
                 raise HTTPException(status_code=499, detail="Client Closed Request")
-            await _abort_if_disconnected(request, cancel_event)
+            await _abort_if_disconnected(request, cancel_event, uuid)
             mesh_idx = min((i // FACE_MESH_EVERY) * FACE_MESH_EVERY, num_frames - 1)
             emo_idx  = min((i // EMOTION_EVERY)  * EMOTION_EVERY,  num_frames - 1)
 
@@ -318,7 +394,7 @@ async def analyze_video(
             fps_den,
             cancel_event
         )
-        await _abort_if_disconnected(request, cancel_event)
+        await _abort_if_disconnected(request, cancel_event, uuid)
         
         if not os.path.exists(rebuilt_video_path):
             logger.error("rebuilt video not found at %s", rebuilt_video_path)
@@ -328,10 +404,10 @@ async def analyze_video(
         logger.info(f"Output video size: {os.path.getsize(rebuilt_video_path)} bytes")
 
         # Spoken-content analysis (guard for missing audio)
-        await _abort_if_disconnected(request, cancel_event)
+        await _abort_if_disconnected(request, cancel_event, uuid)
         update_status(uuid, "transcribing audio", 95)
         analyze_spoken_content(audio_path, job_description, analysis_path, cancel_event)
-        await _abort_if_disconnected(request, cancel_event)
+        await _abort_if_disconnected(request, cancel_event, uuid)
 
         with open(expressions_path, "w") as f:
             json.dump(normalized_expression_stats, f)
@@ -812,20 +888,6 @@ def normalize_expression_stats(expression_stats: dict) -> dict:
     if other_count > 0:
         normalized_expression_stats["other"] = other_count
     return normalized_expression_stats
-
-########################################################
-# Delayed cleanup functions
-########################################################
-
-def delayed_rmtree(path: str, delay_seconds: int = 30):
-    time.sleep(delay_seconds)
-    shutil.rmtree(path, ignore_errors=True)
-    logger.info(f"Cleaned up {path}")
-
-def delayed_cleanup_status(uuid: str, delay_seconds: int = 60):
-    time.sleep(delay_seconds)
-    cleanup_status(uuid)
-    logger.info(f"Cleaned up status for {uuid}")
 
 ########################################################
 # Generate question functions
