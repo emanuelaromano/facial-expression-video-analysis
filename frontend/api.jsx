@@ -1,4 +1,5 @@
 const status = "dev";
+
 export const API_URL =
   status === "prod"
     ? "https://backend-app-916307297241.us-central1.run.app"
