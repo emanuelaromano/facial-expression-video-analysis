@@ -1,4 +1,4 @@
-const status = "dev";
+const status = "prod";
 
 export const API_URL =
   status === "prod"

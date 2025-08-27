@@ -4,7 +4,7 @@ import cv2
 import logging
 import subprocess
 from dotenv import load_dotenv
-from fastapi import APIRouter, File, UploadFile, Form, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, UploadFile, Form, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 from http import HTTPStatus
 from transformers import AutoImageProcessor, AutoModelForImageClassification
@@ -23,6 +23,11 @@ import time
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import glob
+from google.cloud import storage
+from datetime import timedelta
+import google.auth
+from google.auth import impersonated_credentials
+from google.api_core.exceptions import NotFound
 
 load_dotenv()
 
@@ -56,13 +61,34 @@ async def delayed_cleanup_status(uuid: str, delay_seconds: int = 30):
 ########################################################
 # Video processing globals
 ########################################################
-
-TEMP_ROOT = os.getenv("TEMP_ROOT", "/tmp")
-TEMP_BASE = os.path.join(TEMP_ROOT, "hireview")
-delayed_rmtree(TEMP_BASE, 0)
+TEMP_ROOT = os.getenv("TEMP_ROOT", "/tmp")              
+TEMP_BASE = os.getenv("TEMP_BASE", os.path.join(TEMP_ROOT, "hireview"))
 os.makedirs(TEMP_BASE, exist_ok=True)
+BUCKET = os.getenv("BUCKET", "backend-app-storage")
+PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "hireview-prep-470120")
+TARGET_SA = os.getenv("TARGET_SERVICE_ACCOUNT", "916307297241-compute@developer.gserviceaccount.com")
+SCOPES = ["https://www.googleapis.com/auth/devstorage.read_write"]
 
 router = APIRouter()
+
+########################################################
+# Cooperative cancellation registry (per uuid)
+########################################################
+
+from typing import Dict
+
+CANCEL_EVENTS: Dict[str, Event] = {}
+CANCEL_LOCK = Lock()
+
+def get_cancel_event(uuid: str) -> Event:
+    with CANCEL_LOCK:
+        if uuid not in CANCEL_EVENTS:
+            CANCEL_EVENTS[uuid] = Event()
+        return CANCEL_EVENTS[uuid]
+
+def clear_cancel_event(uuid: str) -> None:
+    with CANCEL_LOCK:
+        CANCEL_EVENTS.pop(uuid, None)
 
 ########################################################
 # Logging setup
@@ -134,6 +160,21 @@ except Exception as e:
 
 # Transcription client
 client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Storage client setup for both local and cloud
+def get_storage_client():
+    try:
+        source_creds, _ = google.auth.default(scopes=SCOPES)
+        impersonated = impersonated_credentials.Credentials(
+            source_credentials=source_creds,
+            target_principal=TARGET_SA,
+            target_scopes=SCOPES,
+            lifetime=3600,
+        )
+        return storage.Client(project=PROJECT, credentials=impersonated)
+    except Exception as e:
+        logger.error(f"Falling back to default credentials: {e}")
+        return storage.Client()
 
 ########################################################
 # SSE Streaming endpoints
@@ -218,6 +259,49 @@ def stream(uuid: str):
         }
     )
 
+@router.post("/cancel/{uuid}")
+async def cancel_job(uuid: str):
+    try:
+        ev = get_cancel_event(uuid)
+        ev.set()
+        asyncio.create_task(delayed_rmtree(os.path.join(TEMP_BASE, uuid), 0))
+        asyncio.create_task(asyncio.to_thread(cleanup_status, uuid))
+        return {"ok": True, "cancelled": uuid}
+    except Exception as e:
+        logger.warning(f"Cancel request failed for {uuid}: {e}")
+        return {"ok": False, "cancelled": uuid}
+
+########################################################
+# Upload video to GCS
+########################################################
+
+@router.get("/upload", status_code=HTTPStatus.OK)
+def get_signed_upload_url(uuid: str, filename: str):
+    logger.info(f"Generating signed upload URL for uuid: {uuid}, filename: {filename}")
+    
+    # URL decode the filename in case it comes encoded
+    from urllib.parse import unquote
+    decoded_filename = unquote(filename)
+    logger.info(f"Decoded filename: {decoded_filename}")
+    
+    client = get_storage_client()
+    blob_path = f"hireview/{uuid}/{decoded_filename}"
+    logger.info(f"Generated blob path: {blob_path}")
+    blob = client.bucket(BUCKET).blob(blob_path)
+    url = blob.generate_signed_url(
+        version="v4",
+        expiration=timedelta(minutes=10),
+        method="PUT",
+        content_type="application/octet-stream",
+    )
+    logger.info(f"Generated signed URL for path: {blob.name}")
+    return {
+        "url": url, 
+        "gcs_path": blob.name,
+        "headers": {"Content-Type": "application/octet-stream"}
+    }
+
+
 ########################################################
 # API endpoints
 ########################################################
@@ -227,11 +311,11 @@ async def analyze_video(
     request: Request,
     background_tasks: BackgroundTasks,
     uuid: str = Form(...),
-    original_video: UploadFile = File(...),
+    gcs_path: str = Form(...), 
     job_description: str = Form(...),
 ):
     initialize_status(uuid)
-    cancel_event = Event()
+    cancel_event = get_cancel_event(uuid)
     temp_dir = os.path.join(TEMP_BASE, uuid)
     temp_og_video_path = os.path.join(temp_dir, "video.mp4")
     temp_frames_dir = os.path.join(temp_dir, "frames")
@@ -247,10 +331,31 @@ async def analyze_video(
         # Create temp folders
         os.makedirs(temp_frames_dir, exist_ok=True)
         os.makedirs(temp_processed_dir, exist_ok=True)
-        update_status(uuid, "saving video", 5)
+        update_status(uuid, "downloading video", 5)
 
-        # Save video and extract info
-        save_original_video(original_video, temp_og_video_path)
+        # Get video from GCS and download to temp location
+        client = get_storage_client()
+        bucket = client.bucket(BUCKET)
+        blob = bucket.blob(gcs_path)
+        
+        try:
+            blob.download_to_filename(temp_og_video_path)
+            logger.info(f"Successfully downloaded video from GCS: {gcs_path}")
+        except NotFound:
+            logger.error(f"Video file not found in GCS: {gcs_path}")
+            logger.error(f"Bucket: {BUCKET}, Full path: {gcs_path}")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Video file not found in storage: {gcs_path}. Please ensure the file was uploaded successfully."
+            )
+        except Exception as e:
+            logger.error(f"Failed to download video from GCS: {gcs_path}, Error: {str(e)}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to download video from storage: {str(e)}"
+            )
+
+
         await _abort_if_disconnected(request, cancel_event, uuid)
         
         fps_num, fps_den = get_fps_fraction(temp_og_video_path)
@@ -278,25 +383,33 @@ async def analyze_video(
 
         with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
             logger.info("Starting frame analysis...")
-            futures = {
+            futures_map = {
                 executor.submit(analyze_frame, os.path.join(temp_frames_dir, f"{i}.jpg"), i, cancel_event): i
                 for i in needed_idxs
             }
             completed = 0
-            for future in as_completed(futures):
-                # bail out quickly if canceled
-                if cancel_event.is_set():
-                    break
-                await _abort_if_disconnected(request, cancel_event, uuid)
-                idx = futures[future]
-                result = future.result()
-                expressions[str(idx)] = result or {}
-                completed += 1
-                if completed % 5 == 0 or completed == len(needed_idxs):
-                    progress = int(10 + round(completed/len(needed_idxs) * 30, 0))
-                    update_status(uuid, "analyzing frames", progress)
-                    if completed % 10 == 0:
-                        logger.info(f"Analyzed {completed}/{len(needed_idxs)} frames ({completed/len(needed_idxs)*100:.1f}%)")
+            try:
+                for future in as_completed(futures_map):
+                    # bail out quickly if canceled
+                    if cancel_event.is_set():
+                        for f in futures_map.keys():
+                            f.cancel()
+                        raise HTTPException(status_code=499, detail="Client Closed Request")
+                    await _abort_if_disconnected(request, cancel_event, uuid)
+                    idx = futures_map[future]
+                    result = future.result()
+                    expressions[str(idx)] = result or {}
+                    completed += 1
+                    if completed % 5 == 0 or completed == len(needed_idxs):
+                        progress = int(10 + round(completed/len(needed_idxs) * 30, 0))
+                        update_status(uuid, "analyzing frames", progress)
+                        if completed % 10 == 0:
+                            logger.info(f"Analyzed {completed}/{len(needed_idxs)} frames ({completed/len(needed_idxs)*100:.1f}%)")
+            finally:
+                try:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    pass
 
         await _abort_if_disconnected(request, cancel_event, uuid)
 
@@ -374,9 +487,21 @@ async def analyze_video(
             raise HTTPException(status_code=499, detail="Client Closed Request")
             
         with ZipFile(bundle_path, "w", compression=ZIP_DEFLATED) as zf:
-            zf.write(rebuilt_video_path, arcname="processed_video.mp4")
-            zf.write(analysis_path, arcname="spoken_content_analysis.txt")
-            zf.write(expressions_path, arcname="expression_stats.json")
+            # Safety check: ensure files exist before adding to ZIP
+            if os.path.exists(rebuilt_video_path):
+                zf.write(rebuilt_video_path, arcname="processed_video.mp4")
+            else:
+                logger.warning(f"Processed video not found: {rebuilt_video_path}")
+                
+            if os.path.exists(analysis_path):
+                zf.write(analysis_path, arcname="spoken_content_analysis.txt")
+            else:
+                logger.warning(f"Analysis file not found: {analysis_path}")
+                
+            if os.path.exists(expressions_path):
+                zf.write(expressions_path, arcname="expression_stats.json")
+            else:
+                logger.warning(f"Expression stats not found: {expressions_path}")
 
         # Validate the ZIP file was created correctly
         if not os.path.exists(bundle_path):
@@ -419,6 +544,9 @@ async def analyze_video(
         logger.exception("unexpected error in analyze_video")
         # Best effort: if a partially created bundle exists, return a 500 instead of streaming it
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+    finally:
+        # ensure we clear the cancel event so future jobs reuse a clean state
+        clear_cancel_event(uuid)
 
 
 @router.post("/question", status_code=HTTPStatus.OK)
@@ -818,7 +946,9 @@ def analyze_spoken_content(audio_path: str, job_description: str, analysis_path:
                     model="gpt-4o-mini",
                     input=[
                         {"role": "system",
-                        "content": f"You are a career coach. Analyze the following interview answer and give concise, actionable feedback. The job description is: {job_description}"},
+                        "content": f"""
+                        You are a career coach. Analyze the following interview answer and give concise, actionable feedback. The job description is: {job_description}
+                        """},
                         {"role": "user", "content": transcript},
                     ],
                     text_format=SpokenContentAnalysis,
@@ -865,8 +995,3 @@ def generate_question(job_description: str) -> str:
         text_format=QuestionResponse,
     )
     return response.output_parsed.question
-
-
-
-
-

@@ -4,6 +4,7 @@ substitutions:
   _IMAGE: backend-app
   _TAG: latest
 
+# backend/cloudbuild.yml
 steps:
   - name: gcr.io/cloud-builders/docker
     env:
@@ -12,11 +13,11 @@ steps:
     args:
       [
         "build",
-        "--no-cache",
         "--platform=linux/amd64",
+        "--build-arg","BUILDKIT_INLINE_CACHE=1",
+        "--cache-from","${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:latest",
         "-t","${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:${_TAG}",
         "."
       ]
-
 images:
   - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:${_TAG}"
