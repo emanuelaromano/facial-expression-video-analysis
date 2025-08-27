@@ -47,8 +47,6 @@ function VideoUpload() {
     return null;
   }, [processedVideoUrl, selectedFile]);
 
-  console.log("API_URL", API_URL);
-
   const stopMediaStream = useCallback(() => {
     if (mediaStream) {
       mediaStream.getTracks().forEach((track) => track.stop());
@@ -81,6 +79,10 @@ function VideoUpload() {
       resetVideoState();
       const file = e.target.files[0];
       if (file) {
+        if (file.size > 200 * 1024 * 1024) {
+          dispatch(setBannerThunk("Video size exceeds 200MB", "error"));
+          return;
+        }
         setSelectedFile(file);
         setWasRecorded(false);
         dispatch(setBannerThunk("Video uploaded successfully", "success"));
@@ -88,6 +90,7 @@ function VideoUpload() {
         dispatch(setBannerThunk("No video file selected", "error"));
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [resetVideoState, dispatch],
   );
 
@@ -252,42 +255,16 @@ function VideoUpload() {
       const controller = new AbortController();
       analysisAbortRef.current = controller;
 
-      // Get signed upload URL
-      const uploadResponse = await axios.get(`${API_URL}/video/upload-url`, {
-        params: { uuid: videoId, filename: selectedFile.name },
-        signal: controller.signal,
-      });
-
-      console.log("uploadResponse", uploadResponse.data);
-
-      const { url: uploadUrl, gcs_path } = uploadResponse.data;
-
-      if (!uploadUrl || !gcs_path) {
-        dispatch(setBannerThunk("Error uploading video", "error"));
-        throw new Error("Upload URL or GCS path not found");
-      }
-
-      // Upload file directly to GCS
-      const uploadResult = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": "application/octet-stream" },
-        body: selectedFile,
-        signal: controller.signal,
-      });
-
-      if (!uploadResult.ok) {
-        dispatch(setBannerThunk("Video upload failed", "error"));
-        throw new Error(`GCS upload failed: ${uploadResult.status}`);
-      }
-
-      // Start processing with GCS path (no file upload)
       const formData = new FormData();
       formData.append("uuid", videoId);
-      formData.append("gcs_path", gcs_path);
+      formData.append("original_video", selectedFile);
       formData.append("job_description", jobDescription);
-
+      // Expect a ZIP back (binary)
       const response = await axios.post(`${API_URL}/video/analyze`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
+        headers: {
+          "Content-Type": "multipart/form-data",
+          Accept: "application/zip, application/octet-stream",
+        },
         responseType: "blob",
         signal: controller.signal,
       });
@@ -360,6 +337,7 @@ function VideoUpload() {
     if (analysisAbortRef.current) {
       analysisAbortRef.current.abort();
     }
+    // Note: EventSource will be closed in the finally block when analysis completes
   };
 
   // Cleanup URLs on unmount

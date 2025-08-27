@@ -4,7 +4,7 @@ import cv2
 import logging
 import subprocess
 from dotenv import load_dotenv
-from fastapi import APIRouter, UploadFile, Form, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, File, UploadFile, Form, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 from http import HTTPStatus
 from transformers import AutoImageProcessor, AutoModelForImageClassification
@@ -23,10 +23,6 @@ import time
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import glob
-from google.cloud import storage
-from datetime import timedelta
-import google.auth
-from google.auth import impersonated_credentials
 
 load_dotenv()
 
@@ -61,12 +57,9 @@ async def delayed_cleanup_status(uuid: str, delay_seconds: int = 30):
 # Video processing globals
 ########################################################
 
-TEMP_ROOT = os.getenv("TEMP_ROOT", "/mnt/gcs")
+TEMP_ROOT = os.getenv("TEMP_ROOT", "/tmp")
 TEMP_BASE = os.path.join(TEMP_ROOT, "hireview")
-BUCKET = os.getenv("BUCKET", "backend-app-storage")
-PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "hireview-prep-470120")
-TARGET_SA = os.getenv("TARGET_SERVICE_ACCOUNT", "916307297241-compute@developer.gserviceaccount.com")
-SCOPES = ["https://www.googleapis.com/auth/devstorage.read_write"]
+delayed_rmtree(TEMP_BASE, 0)
 os.makedirs(TEMP_BASE, exist_ok=True)
 
 router = APIRouter()
@@ -141,21 +134,6 @@ except Exception as e:
 
 # Transcription client
 client = OpenAI(api_key=OPENAI_API_KEY)
-
-# Storage client setup for both local and cloud
-def get_storage_client():
-    try:
-        source_creds, _ = google.auth.default(scopes=SCOPES)
-        impersonated = impersonated_credentials.Credentials(
-            source_credentials=source_creds,
-            target_principal=TARGET_SA,
-            target_scopes=SCOPES,
-            lifetime=3600,
-        )
-        return storage.Client(project=PROJECT, credentials=impersonated)
-    except Exception as e:
-        logger.error(f"Falling back to default credentials: {e}")
-        return storage.Client()
 
 ########################################################
 # SSE Streaming endpoints
@@ -241,23 +219,6 @@ def stream(uuid: str):
     )
 
 ########################################################
-# Upload video to GCS
-########################################################
-
-@router.get("/upload-url", status_code=HTTPStatus.OK)
-def get_signed_upload_url(uuid: str, filename: str):
-    client = get_storage_client()
-    blob = client.bucket(BUCKET).blob(f"hireview/{uuid}/{filename}")
-    url = blob.generate_signed_url(
-        version="v4",
-        expiration=timedelta(minutes=10),
-        method="PUT",
-        content_type="application/octet-stream",
-    )
-    return {"url": url, "gcs_path": blob.name}
-
-
-########################################################
 # API endpoints
 ########################################################
 
@@ -266,7 +227,7 @@ async def analyze_video(
     request: Request,
     background_tasks: BackgroundTasks,
     uuid: str = Form(...),
-    gcs_path: str = Form(...), 
+    original_video: UploadFile = File(...),
     job_description: str = Form(...),
 ):
     initialize_status(uuid)
@@ -286,14 +247,10 @@ async def analyze_video(
         # Create temp folders
         os.makedirs(temp_frames_dir, exist_ok=True)
         os.makedirs(temp_processed_dir, exist_ok=True)
-        update_status(uuid, "downloading video", 5)
+        update_status(uuid, "saving video", 5)
 
-        # Get video from GCS and download to temp location
-        client = get_storage_client()
-        bucket = client.bucket(BUCKET)
-        blob = bucket.blob(gcs_path)
-        blob.download_to_filename(temp_og_video_path)
-        
+        # Save video and extract info
+        save_original_video(original_video, temp_og_video_path)
         await _abort_if_disconnected(request, cancel_event, uuid)
         
         fps_num, fps_den = get_fps_fraction(temp_og_video_path)

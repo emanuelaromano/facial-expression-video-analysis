@@ -32,6 +32,16 @@ elif [ "$1" == "-lint" ]; then
     cd frontend
     npx prettier --write .
     cd ..
+elif [ "$1" == "-build-deploy" ]; then
+    cd backend
+    gcloud builds submit . \
+        --config=cloudbuild.yml \
+        --verbosity=debug
+    cd ..
+    gcloud run deploy backend-app \
+        --region=us-central1 \
+        --image us-central1-docker.pkg.dev/hireview-prep-470120/cloud-run-source-deploy/backend-app:latest \
+        --allow-unauthenticated
 elif [ "$1" == "-build" ]; then
     cd backend
     gcloud builds submit . \
@@ -53,4 +63,5 @@ else
     echo "  -lint: Run prettier on frontend"
     echo "  -deploy: Deploy backend to cloud run"
     echo "  -build: Build on cloud build"
+    echo "  -build-deploy: Build and deploy backend to cloud run"
 fi

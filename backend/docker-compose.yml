@@ -16,9 +16,6 @@ services:
       - EMOTION_EVERY=10
       - NUM_WORKERS=4
       - PORT=8080
-      - GOOGLE_CLOUD_PROJECT=hireview-prep-470120
-      - TARGET_SERVICE_ACCOUNT=916307297241-compute@developer.gserviceaccount.com
-    volumes:
-      - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
+      - TEMP_ROOT=/tmp
     platform: linux/amd64
     command: uvicorn main:app --host 0.0.0.0 --port 8080 --reload
