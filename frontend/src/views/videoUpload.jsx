@@ -456,51 +456,53 @@ function VideoUpload() {
 
   return (
     <div className="flex flex-col items-center">
-      <h1 className="text-3xl font-bold mb-8 text-gray-800">
+      <h1 className="text-3xl font-bold mb-8 text-[var(--primary-text)]">
         Upload Your Video
       </h1>
-      <div className="flex flex-col justify-center items-center bg-white p-8 rounded-lg shadow-lg border-2 border-dashed border-gray-300 hover:border-[var(--pink-500)] transition-colors">
-        <div className="text-center w-160 mx-auto">
-          <div className="mb-4">
-            <svg
-              className="mx-auto h-12 w-12 text-gray-400"
-              fill="none"
-              viewBox="0 0 48 48"
-            >
-              <path
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-              />
-            </svg>
-          </div>
+      <div className="flex flex-col justify-center items-center bg-white p-8 rounded-lg shadow-lg border-2 border-dashed border-gray-300 hover:border-[var(--pink-700)] transition-colors">
+        {!expressionStats && !transcriptAnalysis && (
+          <div className="text-center w-160 mx-auto">
+            <div className="mb-4">
+              <svg
+                className="mx-auto h-12 w-12 text-gray-400"
+                fill="none"
+                viewBox="0 0 48 48"
+              >
+                <path
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
+                />
+              </svg>
+            </div>
 
-          <p className="text-lg text-gray-600 mb-4">
-            Click the button below to select your video file
-          </p>
-          <div className="flex flex-row gap-2 px-10 justify-center items-center">
-            <button
-              onClick={handleUploadVideo}
-              className="bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 px-6 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
-            >
-              Upload Video
-            </button>
-            <p className="text-lg text-gray-600 px-4">OR</p>
-            <button
-              onClick={handleRecordVideo}
-              className={`disabled:opacity-50 border-2 border-gray-300 text-[var(--pink-500)] font-bold py-3 px-6 rounded-full transition-colors duration-200 shadow-lg hover:border-[var(--pink-500)] hover:shadow-xl`}
-            >
-              Record Video
-            </button>
+            <p className="text-lg text-gray-600 mb-4">
+              Click the button below to select your video file
+            </p>
+            <div className="flex flex-row gap-2 px-10 justify-center items-center">
+              <button
+                onClick={handleUploadVideo}
+                className="bg-[var(--pink-500)] hover:bg-[var(--pink-700)] text-white font-bold py-3 px-6 rounded-full transition-colors duration-200 shadow-lg hover:shadow-xl"
+              >
+                Upload Video
+              </button>
+              <p className="text-lg text-gray-600 px-4">OR</p>
+              <button
+                onClick={handleRecordVideo}
+                className={`disabled:opacity-50 border-2 border-gray-300 text-[var(--pink-500)] font-bold py-3 px-6 rounded-full transition-colors duration-200 shadow-lg hover:border-[var(--pink-500)] hover:shadow-xl`}
+              >
+                Record Video
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mt-10">
+              {selectedFile
+                ? `${selectedFile.name} (${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)`
+                : "Supported formats: MP4, AVI, MOV, WMV, and more"}
+            </p>
           </div>
-          <p className="text-sm text-gray-500 mt-10">
-            {selectedFile
-              ? `${selectedFile.name} (${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)`
-              : "Supported formats: MP4, AVI, MOV, WMV, and more"}
-          </p>
-        </div>
+        )}
 
         {selectedFile && (
           <div className="flex w-150 flex-col justify-center items-center gap-4">
@@ -680,7 +682,7 @@ function VideoUpload() {
                     className="w-8 h-8 text-white bg-green-500 hover:bg-green-700 rounded-lg p-1"
                   />
                   <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-lg text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
-                    Play
+                    Record
                   </p>
                 </div>
               )}

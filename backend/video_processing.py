@@ -61,6 +61,7 @@ async def delayed_cleanup_status(uuid: str, delay_seconds: int = 30):
 ########################################################
 # Video processing globals
 ########################################################
+
 TEMP_ROOT = os.getenv("TEMP_ROOT", "/tmp")              
 TEMP_BASE = os.getenv("TEMP_BASE", os.path.join(TEMP_ROOT, "hireview"))
 os.makedirs(TEMP_BASE, exist_ok=True)
