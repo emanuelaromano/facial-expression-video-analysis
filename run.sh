@@ -38,17 +38,7 @@ elif [ "$1" == "-build" ]; then
         --config=cloudbuild.yml \
         --verbosity=debug
     cd ..
-elif [ "$1" == "-bd" ]; then
-    cd backend
-    gcloud builds submit . \
-        --config=cloudbuild.yml \
-        --verbosity=debug
-    cd ..
-    gcloud run deploy backend-app \
-        --region=us-central1 \
-        --image us-central1-docker.pkg.dev/hireview-prep-470120/cloud-run-source-deploy/backend-app:latest \
-        --allow-unauthenticated
-elif [ "$1" == "-dep" ]; then
+elif [ "$1" == "-deploy" ]; then
     gcloud run deploy backend-app \
         --region=us-central1 \
         --image us-central1-docker.pkg.dev/hireview-prep-470120/cloud-run-source-deploy/backend-app:latest \
@@ -61,7 +51,6 @@ else
     echo "  -fire: Deploy backend to firebase"
     echo "  -b: Run backend"
     echo "  -lint: Run prettier on frontend"
-    echo "  -bd: Build on cloud build and deploy backend to cloud run"
+    echo "  -deploy: Deploy backend to cloud run"
     echo "  -build: Build on cloud build"
-    echo "  -dep: Deploy backend to cloud run"
 fi

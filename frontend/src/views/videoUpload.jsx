@@ -47,6 +47,8 @@ function VideoUpload() {
     return null;
   }, [processedVideoUrl, selectedFile]);
 
+  console.log("API_URL", API_URL);
+
   const stopMediaStream = useCallback(() => {
     if (mediaStream) {
       mediaStream.getTracks().forEach((track) => track.stop());
@@ -255,6 +257,8 @@ function VideoUpload() {
         params: { uuid: videoId, filename: selectedFile.name },
         signal: controller.signal,
       });
+
+      console.log("uploadResponse", uploadResponse.data);
 
       const { url: uploadUrl, gcs_path } = uploadResponse.data;
 
