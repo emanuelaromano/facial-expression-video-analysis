@@ -90,7 +90,6 @@ function VideoUpload() {
         dispatch(setBannerThunk("No video file selected", "error"));
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [resetVideoState, dispatch],
   );
 
