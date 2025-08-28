@@ -8,13 +8,28 @@
 
   color-scheme: light dark;
   color: #000000;
+  --pink-300: oklch(80.5% 0.202 349.761);
   --pink-400: oklch(71.8% 0.202 349.761);
   --pink-500: oklch(65.6% 0.241 354.308);
   --pink-600: oklch(58.5% 0.231 352.001);
   --pink-700: oklch(52.5% 0.223 3.958);
   --primary-text: #ffffff;
+  --secondary-text: #000000;
+}
 
-  background-color: var(--pink-500);
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: linear-gradient(
+    130deg,
+    var(--pink-700) 0%,
+    var(--pink-700) 20%,
+    var(--pink-500) 20%,
+    var(--pink-500) 70%,
+    var(--pink-400) 70%,
+    var(--pink-400) 100%
+  );
 
   font-family: monospace;
   font-synthesis: none;
@@ -28,10 +43,10 @@
 .bg3 {
   animation: slide 3s ease-in-out infinite alternate;
   bottom: -20%;
-  left: -50%;
+  left: -100%;
   position: fixed;
-  right: -50%;
-  top: 0;
+  right: -90%;
+  top: -20%;
   z-index: 0;
   opacity: 0.4;
 }
@@ -52,7 +67,7 @@
     var(--pink-700) 50%
   );
   animation-direction: alternate-reverse;
-  animation-duration: 5s;
+  animation-duration: 4s;
 }
 
 .bg3 {
@@ -61,7 +76,7 @@
     var(--pink-400) 50%,
     var(--pink-700) 50%
   );
-  animation-duration: 6s;
+  animation-duration: 5s;
 }
 
 h1 {
@@ -70,7 +85,7 @@ h1 {
 
 @keyframes slide {
   0% {
-    transform: translateX(-25%);
+    transform: translateX(-15%);
   }
   100% {
     transform: translateX(25%);
@@ -89,5 +104,34 @@ h1 {
     transform: translateY(-1px) translateX(-1px);
     transition-duration: 0.2s;
     transition-timing-function: ease-in-out;
+  }
+}
+
+.secondary-button {
+  background-color: var(--pink-300);
+  color: var(--primary-text);
+  padding: 1rem 2rem;
+  box-shadow: 3px 3px 0px #000000;
+  cursor: pointer;
+  &:hover {
+    border-color: var(--pink-600);
+    transform: translateY(-1px) translateX(-1px);
+    transition-duration: 0.2s;
+    transition-timing-function: ease-in-out;
+  }
+}
+
+.primary-textbox {
+  color: var(--secondary-text);
+  padding: 1rem 1rem;
+  box-shadow: 3px 3px 0px #000000;
+  border: none;
+  resize: none;
+  border-radius: 0.25rem;
+  margin: 0;
+  border: 1px solid var(--secondary-text);
+  &:focus {
+    outline: none;
+    border-color: var(--pink-600);
   }
 }

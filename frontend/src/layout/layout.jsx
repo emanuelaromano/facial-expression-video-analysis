@@ -11,7 +11,7 @@ const Layout = () => {
     <div className="flex flex-col">
       <Navbar />
       <Banner message={banner?.message} type={banner?.type} />
-      <div className="flex-1 my-30">
+      <div className="flex-1">
         <Outlet />
       </div>
       <Footer />

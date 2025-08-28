@@ -4,7 +4,7 @@ const LandingContent = () => {
   const navigate = useNavigate();
 
   const handleTryDemo = () => {
-    navigate("/video");
+    navigate("/temp");
   };
 
   return (
