@@ -102,10 +102,6 @@ function VideoUpload() {
     [resetVideoState, dispatch, analyzing, videoId],
   );
 
-  useEffect(() => {
-    console.log("videoId", videoId);
-  }, [videoId]);
-
   const handleUploadVideo = () => {
     // If analysis is running, abort it first
     if (analyzing && analysisAbortRef.current) {

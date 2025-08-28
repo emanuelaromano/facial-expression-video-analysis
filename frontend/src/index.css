@@ -108,16 +108,17 @@ h1 {
 }
 
 .secondary-button {
-  background-color: var(--pink-300);
-  color: var(--primary-text);
+  background-color: white;
+  color: var(--pink-700);
   padding: 1rem 2rem;
   box-shadow: 3px 3px 0px #000000;
   cursor: pointer;
   &:hover {
-    border-color: var(--pink-600);
     transform: translateY(-1px) translateX(-1px);
     transition-duration: 0.2s;
     transition-timing-function: ease-in-out;
+    background-color: var(--pink-300);
+    color: #fff;
   }
 }
 
