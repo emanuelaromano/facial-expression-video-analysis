@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { setBannerThunk } from "../redux/slices/videoSlice";
 import { useDispatch } from "react-redux";
-import { House } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 const VideoUploadContent = () => {
