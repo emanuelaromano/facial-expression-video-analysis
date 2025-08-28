@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { setBannerThunk } from "../redux/slices/videoSlice";
 import { useDispatch } from "react-redux";
+import { House } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 const VideoUploadContent = () => {
   const [scenario, setScenario] = useState("");
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   return (
     <div
       className="flex justify-center flex-col items-center relative overflow-hidden"
@@ -25,14 +28,19 @@ const VideoUploadContent = () => {
         gap: "2rem",
       }}
     >
-      {currentSectionIndex > 0 && (
-        <div
-          className="absolute top-6 left-6 cursor-pointer underline text-sm hover:translate-y-[-1px] hover:translate-x-[-1px] transition-all duration-300 ease-in-out"
-          onClick={() => setCurrentSectionIndex(currentSectionIndex - 1)}
-        >
-          Back
-        </div>
-      )}
+      <div
+        className="absolute top-6 left-6 cursor-pointer underline text-sm hover:translate-y-[-1px] hover:translate-x-[-1px] transition-all duration-300 ease-in-out"
+        onClick={() => {
+          if (currentSectionIndex === 0) {
+            navigate("/");
+          } else {
+            setCurrentSectionIndex(currentSectionIndex - 1);
+          }
+        }}
+      >
+        {currentSectionIndex > 0 && <span>Back</span>}
+        {currentSectionIndex === 0 && <span>Home</span>}
+      </div>
       <div className="flex flex-col w-full p-20">
         <div
           className={`flex w-[70%] absolute top-[50%] flex-col justify-center items-center gap-5 transition-all duration-500 ease-in-out 

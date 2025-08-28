@@ -1,7 +1,7 @@
 const Footer = () => {
   return (
     <div className="fixed text-sm text-[var(--primary-text)] bottom-0 left-0 right-0 z-50 mb-4 ml-4">
-      <h1>great-speeches.io @ 2025</h1>
+      <h1>Great Speeches AI @ 2025</h1>
     </div>
   );
 };
