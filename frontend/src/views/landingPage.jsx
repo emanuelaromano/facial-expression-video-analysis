@@ -5,24 +5,35 @@ import steveJobs from "../assets/steve-jobs.jpg";
 import { useState, useEffect } from "react";
 import LandingContent from "../components/landingContent";
 
-const images = [johnKennedy, martinLutherKing, winstonChurchill, steveJobs];
+const images = [martinLutherKing, johnKennedy, winstonChurchill, steveJobs];
 
 const LandingPage = () => {
   const [imageOrder, setImageOrder] = useState(images.map((_, index) => index));
+  const [isMounted, setIsMounted] = useState({
+    status: false,
+    setInterval: 3000,
+  });
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const newImageOrder = [...imageOrder];
-      const temp = newImageOrder[0];
-      newImageOrder[0] = newImageOrder[1];
-      newImageOrder[1] = newImageOrder[2];
-      newImageOrder[2] = newImageOrder[3];
-      newImageOrder[3] = temp;
-      setImageOrder(newImageOrder);
-    }, 3000);
+      if (!isMounted.status) {
+        setIsMounted({
+          status: true,
+          setInterval: 6000,
+        });
+      } else {
+        const newImageOrder = [...imageOrder];
+        const temp = newImageOrder[0];
+        newImageOrder[0] = newImageOrder[1];
+        newImageOrder[1] = newImageOrder[2];
+        newImageOrder[2] = newImageOrder[3];
+        newImageOrder[3] = temp;
+        setImageOrder(newImageOrder);
+      }
+    }, isMounted.setInterval);
 
     return () => clearInterval(interval);
-  }, [imageOrder]);
+  }, [imageOrder, isMounted]);
 
   return (
     <div className="h-screen w-screen overflow-hidden">
