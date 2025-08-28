@@ -10,12 +10,14 @@ const LandingContent = () => {
   return (
     <div
       style={{
-        backgroundColor: "rgba(255, 255, 255, 0.8)",
+        backgroundColor: "rgba(255, 255, 255, 0.95)",
         borderRadius: "0.25em",
         boxShadow: "0 0 0.25em rgba(0, 0, 0, 0.25)",
         boxSizing: "border-box",
         left: "50%",
-        padding: "10vmin",
+        padding: "max(10vmin, 2rem)",
+        paddingLeft: "max(15vmin, 2rem)",
+        paddingRight: "max(15vmin, 2rem)",
         position: "fixed",
         textAlign: "center",
         top: "50%",
@@ -23,9 +25,13 @@ const LandingContent = () => {
         display: "flex",
         flexDirection: "column",
         gap: "2rem",
+        minWidth: "min(100%, 300px)",
       }}
     >
-      <div>Learn to Speak Like a Leader</div>
+      <div className="flex flex-col items-center justify-center gap-3">
+        <div className="text-lg font-bold">Get Started</div>
+        <div>Learn to Speak Like a Leader</div>
+      </div>
       <button className="primary-button" onClick={handleTryDemo}>
         Try the Demo
       </button>

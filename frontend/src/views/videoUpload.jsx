@@ -17,7 +17,7 @@ function VideoUpload() {
   const analysisAbortRef = useRef(null);
   const questionAllowedSeconds = 5;
 
-  const [jobDescription, _] = useState("Data Engineer");
+  const [scenarioDescription, _] = useState("Data Engineer");
   const [selectedFile, setSelectedFile] = useState(null);
   const [recordVideo, setRecordVideo] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -304,7 +304,7 @@ function VideoUpload() {
       const formData = new FormData();
       formData.append("uuid", videoId);
       formData.append("gcs_path", gcs_path);
-      formData.append("job_description", jobDescription);
+      formData.append("scenario_description", scenarioDescription);
 
       const response = await axios.post(`${API_URL}/video/analyze`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -358,7 +358,7 @@ function VideoUpload() {
       // Close the EventSource
       eventSource.close();
     }
-  }, [selectedFile, videoId, dispatch, jobDescription]);
+  }, [selectedFile, videoId, dispatch, scenarioDescription]);
 
   useEffect(() => {
     if (mediaStream && videoRef.current) {
@@ -411,7 +411,7 @@ function VideoUpload() {
       clearInterval(questionIntervalRef.current);
     }
     const formData = new FormData();
-    formData.append("job_description", jobDescription);
+    formData.append("scenario_description", scenarioDescription);
     try {
       const response = await axios.post(`${API_URL}/video/question`, formData);
       if (

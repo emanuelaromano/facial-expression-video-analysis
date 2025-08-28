@@ -96,7 +96,7 @@ const VideoUploadContent = () => {
             <button className="primary-button w-full">Record Video</button>
             <p className="text-sm text-gray-600">
               or{" "}
-              <button className="cursor-pointer">
+              <button className="cursor-pointer hover:translate-y-[-0.5px] hover:translate-x-[-0.5px] transition-all duration-300 ease-in-out">
                 <span className="underline font-bold">upload</span>
               </button>{" "}
               a video

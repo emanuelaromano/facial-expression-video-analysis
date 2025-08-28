@@ -313,7 +313,7 @@ async def analyze_video(
     background_tasks: BackgroundTasks,
     uuid: str = Form(...),
     gcs_path: str = Form(...), 
-    job_description: str = Form(...),
+    scenario_description: str = Form(...),
 ):
     initialize_status(uuid)
     cancel_event = get_cancel_event(uuid)
@@ -477,7 +477,7 @@ async def analyze_video(
         # Spoken-content analysis (guard for missing audio)
         await _abort_if_disconnected(request, cancel_event, uuid)
         update_status(uuid, "transcribing audio", 95)
-        analyze_spoken_content(audio_path, job_description, analysis_path, cancel_event)
+        analyze_spoken_content(audio_path, scenario_description, analysis_path, cancel_event)
         await _abort_if_disconnected(request, cancel_event, uuid)
 
         with open(expressions_path, "w") as f:
@@ -551,9 +551,9 @@ async def analyze_video(
 
 
 @router.post("/question", status_code=HTTPStatus.OK)
-async def generate_interview_question(job_description: str = Form(...)):
+async def generate_interview_question(scenario_description: str = Form(...)):
     try:
-        question = generate_question(job_description)
+        question = generate_question(scenario_description)
         return {
             "question": question
         }
@@ -930,7 +930,7 @@ def transcribe_audio(audio_path: str, cancel_event: Event) -> str:
 class SpokenContentAnalysis(BaseModel):
     analysis: str = Field(description="The analysis of the spoken content")
 
-def analyze_spoken_content(audio_path: str, job_description: str, analysis_path: str, cancel_event: Event) -> None:
+def analyze_spoken_content(audio_path: str, scenario_description: str, analysis_path: str, cancel_event: Event) -> None:
     spoken_content_analysis = "No audio stream found."
     try:
         if audio_path:
@@ -948,7 +948,7 @@ def analyze_spoken_content(audio_path: str, job_description: str, analysis_path:
                     input=[
                         {"role": "system",
                         "content": f"""
-                        You are a career coach. Analyze the following interview answer and give concise, actionable feedback. The job description is: {job_description}
+                        You are a speech coach. Analyze the following interview answer and give concise, actionable feedback. The scenario description is: {scenario_description}
                         """},
                         {"role": "user", "content": transcript},
                     ],
@@ -984,13 +984,13 @@ def normalize_expression_stats(expression_stats: dict) -> dict:
 class QuestionResponse(BaseModel):
     question: str = Field(description="The interview question")
 
-def generate_question(job_description: str) -> str:
+def generate_question(scenario_description: str) -> str:
     response = client.responses.parse(
         model="gpt-4o-mini",
         input=[
             {
                 "role": "system",
-                "content": f"You are a career coach. Generate a possible interview question for the following job description: {job_description}",
+                "content": f"You are a career coach. Generate a possible interview question for the following job description: {scenario_description}",
             },
         ],
         text_format=QuestionResponse,

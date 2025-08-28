@@ -25,7 +25,7 @@ const LandingPage = () => {
   }, [imageOrder]);
 
   return (
-    <div>
+    <div className="h-screen w-screen overflow-hidden">
       <div className="fixed top-0 left-0 w-full h-full">
         <img
           src={images[imageOrder[0]]}

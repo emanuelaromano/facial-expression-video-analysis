@@ -67,7 +67,7 @@ body {
     var(--pink-700) 50%
   );
   animation-direction: alternate-reverse;
-  animation-duration: 4s;
+  animation-duration: 5s;
 }
 
 .bg3 {
@@ -76,7 +76,7 @@ body {
     var(--pink-400) 50%,
     var(--pink-700) 50%
   );
-  animation-duration: 5s;
+  animation-duration: 7s;
 }
 
 h1 {
