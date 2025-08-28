@@ -7,7 +7,7 @@ import { API_URL } from "../../api";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import JSZip from "jszip";
-import { CircleX } from "lucide-react";
+import { CircleX, CirclePlay } from "lucide-react";
 
 const VideoUploadContent = () => {
   const dispatch = useDispatch();
@@ -60,7 +60,6 @@ const VideoUploadContent = () => {
   }, [mediaStream]);
 
   const resetVideoState = useCallback(() => {
-    setTimeout(() => {}, 500);
     setCurrentSectionIndex(currentSectionIndex - 1);
     setSelectedFile(null);
     setWasRecorded(false);
@@ -97,7 +96,6 @@ const VideoUploadContent = () => {
       if (file) {
         dispatch(setBannerThunk("Video uploaded successfully", "success"));
         setSelectedFile(file);
-        setTimeout(() => {}, 1000);
         setCurrentSectionIndex(currentSectionIndex + 1);
         setWasRecorded(false);
       } else {
@@ -138,6 +136,7 @@ const VideoUploadContent = () => {
     resetVideoState();
     setRecordVideo(true);
     setCameraLoading(true);
+    setCurrentSectionIndex(2);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -545,7 +544,12 @@ const VideoUploadContent = () => {
                 </p>
               </div>
               <div className="flex flex-col gap-6 w-full">
-                <button className="primary-button w-full">Record Video</button>
+                <button
+                  onClick={handleRecordVideo}
+                  className="primary-button w-full"
+                >
+                  Record Video
+                </button>
                 <p className="text-sm text-gray-600">
                   or{" "}
                   <button
@@ -573,7 +577,7 @@ const VideoUploadContent = () => {
           className={`flex h-[80%] absolute top-[50%] flex-col justify-center items-center gap-4 transition-all duration-500 ease-in-out
           ${currentSectionIndex === 2 ? "left-[50%] translate-x-[-50%] translate-y-[-50%]" : "left-[150%] translate-x-[-50%] translate-y-[-50%]"}`}
         >
-          <div className="h-full w-full relative bg-black border-gray-300 flex justify-center items-center rounded-lg overflow-hidden">
+          <div className="h-full w-full relative bg-black border-gray-300 flex justify-center items-center rounded-[0.25rem] overflow-hidden">
             <video
               key={videoUrl}
               controls
@@ -585,9 +589,9 @@ const VideoUploadContent = () => {
                 <div className="relative flex group">
                   <CircleX
                     onClick={resetVideoState}
-                    className="w-8 h-8 cursor-pointer text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1"
+                    className="w-8 h-8 cursor-pointer font-mono text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-[0.25rem] p-1"
                   />
-                  <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-lg text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
+                  <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
                     Close
                   </p>
                 </div>
@@ -596,9 +600,9 @@ const VideoUploadContent = () => {
                   <div className="relative flex group">
                     <RotateCcw
                       onClick={handleRecordVideo}
-                      className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-lg p-1"
+                      className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-[0.25rem] p-1"
                     />
-                    <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-lg text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
+                    <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
                       Record Again
                     </p>
                   </div>
@@ -622,6 +626,78 @@ const VideoUploadContent = () => {
               Run Analysis
             </button>
           )}
+        </div>
+      )}
+      {!selectedFile && currentSectionIndex === 2 && recordVideo && (
+        <div
+          className={`flex h-[80%] absolute rounded-[0.25rem] top-[50%] flex-col justify-center items-center gap-4 transition-all duration-500 ease-in-out
+                ${currentSectionIndex === 2 ? "left-[50%] translate-x-[-50%] translate-y-[-50%]" : "left-[150%] translate-x-[-50%] translate-y-[-50%]"}`}
+        >
+          {cameraLoading ? (
+            <div className="h-[80%] bg-gray-800 flex items-center justify-center rounded-[0.25rem]">
+              <div className="text-white text-center ">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mx-auto mb-2" />
+                <p>Accessing camera...</p>
+              </div>
+            </div>
+          ) : (
+            <div className="relative h-full">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full object-contain bg-gray-800 rounded-[0.25rem]"
+                style={{ minHeight: "300px", transform: "scaleX(-1)" }}
+              />
+              {recording && (
+                <div className="absolute top-4 left-4 bg-red-500 text-white px-3 py-1 rounded-full flex items-center gap-2">
+                  <div className="w-3 h-3 bg-white rounded-full animate-pulse" />{" "}
+                  REC
+                </div>
+              )}
+              {question && !recording && (
+                <div className="absolute justify-between items-center flex gap-2 bg-black/80 text-white px-3 py-2 rounded-[0.25rem] left-4 right-4 bottom-16 text-left">
+                  <p className="text-sm text-left">{question}</p>
+                  <p className="text-sm border-l-2 border-white pl-2 min-w-20 self-stretch flex items-center justify-center">
+                    {seconds}s
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="absolute top-2 right-2 flex flex-col gap-2">
+            <div className="relative flex group">
+              <CircleX
+                onClick={resetVideoState}
+                className="w-8 h-8 text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-[0.25rem] p-1"
+              />
+              <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100">
+                Close
+              </p>
+            </div>
+            {recording ? (
+              <div className="relative flex group">
+                <CircleStop
+                  onClick={handleStopRecording}
+                  className="w-8 h-8 text-white bg-red-500 hover:bg-red-700 rounded-[0.25rem] p-1"
+                />
+                <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
+                  Stop
+                </p>
+              </div>
+            ) : (
+              <div className="relative flex group">
+                <CirclePlay
+                  onClick={handleStartRecording}
+                  className="w-8 h-8 text-white bg-green-500 hover:bg-green-700 rounded-[0.25rem] p-1"
+                />
+                <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
+                  Record
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </>
