@@ -21,15 +21,14 @@ const LandingPage = () => {
           status: true,
           setInterval: 6000,
         });
-      } else {
-        const newImageOrder = [...imageOrder];
-        const temp = newImageOrder[0];
-        newImageOrder[0] = newImageOrder[1];
-        newImageOrder[1] = newImageOrder[2];
-        newImageOrder[2] = newImageOrder[3];
-        newImageOrder[3] = temp;
-        setImageOrder(newImageOrder);
       }
+      const newImageOrder = [...imageOrder];
+      const temp = newImageOrder[0];
+      newImageOrder[0] = newImageOrder[1];
+      newImageOrder[1] = newImageOrder[2];
+      newImageOrder[2] = newImageOrder[3];
+      newImageOrder[3] = temp;
+      setImageOrder(newImageOrder);
     }, isMounted.setInterval);
 
     return () => clearInterval(interval);

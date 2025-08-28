@@ -502,7 +502,7 @@ function VideoUpload() {
 
         {selectedFile && (
           <div className="flex w-150 flex-col justify-center items-center gap-4">
-            <div className="mt-4 relative bg-black border-2 border-gray-300 flex justify-center items-center rounded-lg overflow-hidden">
+            <div className="mt-4 relative bg-black border-2 border-gray-300 flex justify-center items-center rounded-lg overflow-hidden aspect-video">
               <video
                 key={videoUrl}
                 controls
@@ -601,10 +601,10 @@ function VideoUpload() {
         )}
 
         {recordVideo && (
-          <div className="mt-4 relative mx-auto bg-black border-2 border-gray-300 rounded-lg overflow-hidden w-150">
+          <div className="mt-4 relative mx-auto bg-black border-2 border-gray-300 rounded-lg overflow-hidden w-150 aspect-video">
             {cameraLoading ? (
               <div
-                className="w-150 h-fit bg-gray-800 flex items-center justify-center"
+                className="w-150 h-fit bg-gray-800 flex items-center justify-center aspect-video"
                 style={{ minHeight: "300px" }}
               >
                 <div className="text-white text-center">
@@ -613,7 +613,7 @@ function VideoUpload() {
                 </div>
               </div>
             ) : (
-              <div className="relative">
+              <div className="relative aspect-video">
                 <video
                   ref={videoRef}
                   autoPlay
