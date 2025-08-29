@@ -3,11 +3,17 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { setBannerThunk } from "../redux/slices/videoSlice";
 import { useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { API_URL } from "../../api";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import JSZip from "jszip";
-import { CircleX, CirclePlay, CircleStop, RotateCcw } from "lucide-react";
+import {
+  CircleX,
+  CirclePlay,
+  CircleStop,
+  RotateCcw,
+  ChevronLeft,
+  X,
+} from "lucide-react";
 import ExpressionStats from "../components/expressionStats";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -61,11 +67,10 @@ const VideoUpload = () => {
     if (analysisAbortRef.current) {
       // If analysis is running, abort it first
       analysisAbortRef.current.abort();
-      fetch(`${API_URL}/video/cancel/${videoId}`, { method: "POST" }).catch(
-        () => {},
-      );
+      fetch(`/api/video/cancel/${videoId}`, { method: "POST" }).catch(() => {});
     }
-    setCurrentSectionIndex(currentSectionIndex - 1);
+
+    stopMediaStream();
     setSelectedFile(null);
     setWasRecorded(false);
     setTranscript(null);
@@ -78,15 +83,17 @@ const VideoUpload = () => {
     setProgress({ percent: 0, state: "initializing" });
     setAnalyzing(false);
     setCameraLoading(false);
-    stopMediaStream();
     setCurrentSectionIndex(1);
+
+    // Reset video element
     if (videoRef.current) {
       videoRef.current.srcObject = null;
       videoRef.current.load();
     }
+
     // Reset the video ID for a fresh analysis
     videoIdRef.current = uuidv4();
-  }, [stopMediaStream, currentSectionIndex, videoId]);
+  }, [stopMediaStream, videoId, currentSectionIndex]);
 
   const handleVideoUpload = useCallback(
     (e) => {
@@ -94,7 +101,7 @@ const VideoUpload = () => {
       if (analyzing && analysisAbortRef.current) {
         analysisAbortRef.current.abort();
         // Fire-and-forget server-side cancel
-        fetch(`${API_URL}/video/cancel/${videoId}`, { method: "POST" }).catch(
+        fetch(`/api/video/cancel/${videoId}`, { method: "POST" }).catch(
           () => {},
         );
         setAnalyzing(false);
@@ -147,9 +154,7 @@ const VideoUpload = () => {
     if (analyzing && analysisAbortRef.current) {
       analysisAbortRef.current.abort();
       // Fire-and-forget server-side cancel
-      fetch(`${API_URL}/video/cancel/${videoId}`, { method: "POST" }).catch(
-        () => {},
-      );
+      fetch(`/api/video/cancel/${videoId}`, { method: "POST" }).catch(() => {});
       setAnalyzing(false);
     }
 
@@ -276,7 +281,7 @@ const VideoUpload = () => {
     setTranscriptAnalysis(null);
 
     // Create EventSource for streaming updates
-    const eventSource = new EventSource(`${API_URL}/video/stream/${videoId}`);
+    const eventSource = new EventSource(`/api/video/stream/${videoId}`);
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -302,7 +307,7 @@ const VideoUpload = () => {
       analysisAbortRef.current = controller;
 
       // Get signed upload URL
-      const uploadResponse = await axios.get(`${API_URL}/video/upload`, {
+      const uploadResponse = await axios.get(`/api/video/upload`, {
         params: { uuid: videoId, filename: selectedFile.name },
         signal: controller.signal,
       });
@@ -336,7 +341,7 @@ const VideoUpload = () => {
       formData.append("gcs_path", gcs_path);
       formData.append("scenario_description", scenario);
 
-      const response = await axios.post(`${API_URL}/video/analyze`, formData, {
+      const response = await axios.post(`/api/video/analyze`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         responseType: "blob",
         signal: controller.signal,
@@ -429,10 +434,7 @@ const VideoUpload = () => {
     formData.append("scenario_description", scenario);
 
     try {
-      const response = await axios.post(
-        `${API_URL}/video/transcript`,
-        formData,
-      );
+      const response = await axios.post(`/api/video/transcript`, formData);
       if (
         response.status < 200 ||
         response.status >= 300 ||
@@ -471,19 +473,21 @@ const VideoUpload = () => {
             gap: "2rem",
           }}
         >
-          <div
-            className="absolute top-6 left-6 cursor-pointer underline text-sm hover:translate-y-[-1px] hover:translate-x-[-1px] transition-all duration-300 ease-in-out"
+          <X
             onClick={() => {
-              if (currentSectionIndex === 0) {
-                navigate("/");
-              } else {
-                setCurrentSectionIndex(currentSectionIndex - 1);
-              }
+              navigate("/");
+              resetVideoState();
             }}
-          >
-            {currentSectionIndex > 0 && <span>Back</span>}
-            {currentSectionIndex === 0 && <span>Home</span>}
-          </div>
+            className="w-8 h-8 cursor-pointer absolute top-2 right-2 font-mono text-[var(--pink-500)] bg-white hover:text-[var(--pink-700)] p-1"
+          />
+          {currentSectionIndex > 0 && (
+            <ChevronLeft
+              onClick={() => {
+                setCurrentSectionIndex(currentSectionIndex - 1);
+              }}
+              className="w-8 h-8 cursor-pointer absolute top-2 left-2 font-mono text-[var(--pink-500)] bg-white hover:text-[var(--pink-700)] p-1"
+            />
+          )}
           <div className="flex flex-col w-full p-20">
             <div
               className={`flex w-[80%] absolute top-[50%] flex-col justify-center items-center gap-5 transition-all duration-500 ease-in-out 
@@ -743,6 +747,10 @@ const VideoUpload = () => {
             marginBottom: "15vh",
           }}
         >
+          <X
+            onClick={resetVideoState}
+            className="w-8 h-8 cursor-pointer absolute top-2 right-2 font-mono text-[var(--pink-500)] bg-white hover:text-[var(--pink-700)] p-1"
+          />
           <div className="flex flex-col w-full items-center justify-center">
             <div className="text-lg font-bold mb-8">Expression Stats</div>
             <div className="w-full flex flex-col items-center justify-center">

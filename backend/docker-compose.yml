@@ -20,5 +20,6 @@ services:
       - TARGET_SERVICE_ACCOUNT=916307297241-compute@developer.gserviceaccount.com
     volumes:
       - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
+      - ./:/app
     platform: linux/amd64
     command: uvicorn main:app --host 0.0.0.0 --port 8080 --reload

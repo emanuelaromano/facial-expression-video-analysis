@@ -9,7 +9,7 @@ export default defineConfig({
   server: {
     proxy: {
       // Your HTTP API
-      "/video": {
+      "/api/video": {
         target: API_URL,
         changeOrigin: true,
       },
