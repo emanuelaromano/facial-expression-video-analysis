@@ -964,7 +964,8 @@ def generate_transcript(scenario_description: str) -> str:
         input=[
             {
                 "role": "system",
-                "content": f"You are a speech coach. Generate a possible transcript for a video based on the following scenario description: {scenario_description}",
+                "content": f"You are a speech coach. The user is practicing a speech. 
+                The scenario description is: {scenario_description}. Write a transcript of the speech in the user's own words.",
             },
         ],
         text_format=TranscriptResponse,

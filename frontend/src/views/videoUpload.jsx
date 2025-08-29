@@ -6,14 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import JSZip from "jszip";
-import {
-  CircleX,
-  CirclePlay,
-  CircleStop,
-  RotateCcw,
-  ChevronLeft,
-  X,
-} from "lucide-react";
+import { Play, Square, RotateCcw, ChevronLeft, X, Grip } from "lucide-react";
 import ExpressionStats from "../components/expressionStats";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -28,7 +21,9 @@ const VideoUpload = () => {
   const analysisAbortRef = useRef(null);
   const videoIdRef = useRef(uuidv4());
   const videoId = videoIdRef.current;
-
+  const transcriptRef = useRef(null);
+  const dragStartRef = useRef({ x: 0, y: 0, mx: 0, my: 0 });
+  const resizeStartRef = useRef({ tx: 0, ty: 0, w: 0, h: 0 });
   const [scenario, setScenario] = useState("");
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
 
@@ -42,6 +37,10 @@ const VideoUpload = () => {
   const [analyzing, setAnalyzing] = useState(false);
   const [transcript, setTranscript] = useState(null);
   const [generatingTranscript, setGeneratingTranscript] = useState(false);
+  const [transcriptPositionX, setTranscriptPositionX] = useState(0);
+  const [transcriptPositionY, setTranscriptPositionY] = useState(0);
+  const [transcriptWidth, setTranscriptWidth] = useState(0);
+  const [transcriptHeight, setTranscriptHeight] = useState(0);
   const [progress, setProgress] = useState({
     percent: 0,
     state: "initializing",
@@ -83,7 +82,13 @@ const VideoUpload = () => {
     setProgress({ percent: 0, state: "initializing" });
     setAnalyzing(false);
     setCameraLoading(false);
-    setCurrentSectionIndex(1);
+    setTranscriptPositionX(0);
+    setTranscriptPositionY(0);
+    setTranscriptWidth(0);
+    setTranscriptHeight(0);
+    const newIndex =
+      currentSectionIndex - 1 === 2 ? 1 : currentSectionIndex - 1;
+    setCurrentSectionIndex(newIndex);
 
     // Reset video element
     if (videoRef.current) {
@@ -113,22 +118,6 @@ const VideoUpload = () => {
         setSelectedFile(file);
         setCurrentSectionIndex(currentSectionIndex + 1);
         setWasRecorded(false);
-
-        // // TODO: Remove this
-        // setCurrentSectionIndex(3);
-        // setExpressionStats({
-        //   neutral: 0.4,
-        //   happy: 0.2,
-        //   sad: 0.2,
-        //   angry: 0.1,
-        //   surprised: 0.1,
-        // });
-        // setTranscriptAnalysis(
-        //   `You are very clear in your speech and you are easy to understand.
-
-        //   You are also very engaging and you are able to keep the audience's attention. The context of the interview is about the product you are selling and the benefits of the product. You are a very good salesperson and you are able to sell the product to the audience. You are also very confident and you are able to sell the product to the audience. You are also very persuasive and you are able to sell the product to the audience. You are also very charismatic and you are able to sell the product to the audience. You are also very likable and you are able to sell the product to the audience.
-        //   You are also very trustworthy and you are able to sell the product to the audience. You are also very knowledgeable and you are able to sell the product to the audience.`,
-        // );
       } else {
         dispatch(setBannerThunk("No video file selected", "error"));
       }
@@ -451,6 +440,70 @@ const VideoUpload = () => {
     }
   };
 
+  const startDragging = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragStartRef.current = {
+      x: transcriptPositionX,
+      y: transcriptPositionY,
+      mx: e.clientX,
+      my: e.clientY,
+    };
+
+    const onMove = (ev) => {
+      const dx = ev.clientX - dragStartRef.current.mx;
+      const dy = ev.clientY - dragStartRef.current.my;
+      setTranscriptPositionX(dragStartRef.current.x + dx);
+      setTranscriptPositionY(dragStartRef.current.y + dy);
+    };
+
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  const handleResize = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!transcriptRef.current) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startW = transcriptRef.current.offsetWidth;
+    const startH = transcriptRef.current.offsetHeight;
+    resizeStartRef.current = {
+      tx: transcriptPositionX,
+      ty: transcriptPositionY,
+      w: startW,
+      h: startH,
+    };
+
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+
+      const nextW = Math.max(160, resizeStartRef.current.w + dx);
+      const nextH = Math.max(80, resizeStartRef.current.h + dy);
+
+      setTranscriptWidth(nextW);
+      setTranscriptHeight(nextH);
+      const dH = nextH - resizeStartRef.current.h;
+      setTranscriptPositionY(resizeStartRef.current.ty + dH);
+    };
+
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
   return (
     <div className="flex flex-col items-center justify-center">
       {currentSectionIndex < 2 && (
@@ -595,7 +648,7 @@ const VideoUpload = () => {
             />
             <div className="absolute top-2 right-2 flex flex-col gap-2">
               <div className="relative flex group">
-                <CircleX
+                <X
                   onClick={resetVideoState}
                   className="w-8 h-8 cursor-pointer font-mono text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-[0.25rem] p-1"
                 />
@@ -608,7 +661,7 @@ const VideoUpload = () => {
                 <div className="relative flex group">
                   <RotateCcw
                     onClick={handleRecordVideo}
-                    className="w-8 h-8 cursor-pointer text-white bg-orange-500 hover:bg-orange-700 rounded-[0.25rem] p-1"
+                    className="w-8 h-8 cursor-pointer text-white bg-orange-500 hover:bg-orange-700 rounded-[0.25rem] p-2"
                   />
                   <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
                     Record Again
@@ -675,17 +728,40 @@ const VideoUpload = () => {
                 </div>
               )}
               {transcript && (
-                <div className="absolute justify-between items-center flex gap-2 bg-black/80 text-white px-3 py-2 rounded-[0.25rem] left-4 right-4 bottom-16 text-left z-10">
-                  <p className="text-sm text-left">
-                    Hello my name is Emanuela and I
-                  </p>
+                <div className="relative">
+                  <div
+                    ref={transcriptRef}
+                    onMouseDown={startDragging}
+                    style={{
+                      transform: `translate(${transcriptPositionX}px, ${transcriptPositionY}px)`,
+                      width:
+                        transcriptWidth > 0 ? `${transcriptWidth}px` : "65vw",
+                      height:
+                        transcriptHeight > 0 ? `${transcriptHeight}px` : "20vh",
+                    }}
+                    className="absolute left-4 bottom-16 justify-between items-center flex gap-2 bg-black/80 text-white px-3 py-2 rounded-[0.25rem] text-left z-10 cursor-move select-none"
+                  >
+                    <div className="text-sm text-left absolute top-5 left-5 right-5 bottom-5 overflow-y-auto prose prose-sm prose-invert max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {transcript}
+                      </ReactMarkdown>
+                    </div>
+                    <Grip
+                      onMouseDown={handleResize}
+                      className="absolute text-white w-4 h-4 right-2 bottom-2 z-10 cursor-se-resize"
+                    />
+                    <X
+                      onClick={() => setTranscript("")}
+                      className="absolute top-0 right-0 w-6 h-6 cursor-pointer text-white bg-black/50 hover:bg-black/70 rounded-[0.25rem] p-1"
+                    />
+                  </div>
                 </div>
               )}
             </div>
           )}
           <div className="absolute aspect-video top-2 right-2 flex flex-col gap-2">
             <div className="relative flex group">
-              <CircleX
+              <X
                 onClick={resetVideoState}
                 className="w-8 h-8 cursor-pointer text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-[0.25rem] p-1"
               />
@@ -695,7 +771,7 @@ const VideoUpload = () => {
             </div>
             {recording ? (
               <div className="relative flex group">
-                <CircleStop
+                <Square
                   onClick={handleStopRecording}
                   className="w-8 h-8 cursor-pointer text-white bg-red-500 hover:bg-red-700 rounded-[0.25rem] p-1"
                 />
@@ -705,7 +781,7 @@ const VideoUpload = () => {
               </div>
             ) : (
               <div className="relative flex group">
-                <CirclePlay
+                <Play
                   onClick={handleStartRecording}
                   className="w-8 h-8 cursor-pointer text-white bg-green-500 hover:bg-green-700 rounded-[0.25rem] p-1"
                 />
@@ -730,7 +806,7 @@ const VideoUpload = () => {
             }}
           >
             {generatingTranscript
-              ? "Generating Transcript..."
+              ? "Generating Transcript"
               : "Generate Transcript"}
           </button>
         </div>
