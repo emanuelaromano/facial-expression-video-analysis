@@ -4,7 +4,7 @@ const LandingContent = () => {
   const navigate = useNavigate();
 
   const handleTryDemo = () => {
-    navigate("/temp");
+    navigate("/video");
   };
 
   return (
@@ -16,6 +16,8 @@ const LandingContent = () => {
         boxSizing: "border-box",
         left: "50%",
         padding: "8vmin",
+        paddingLeft: "12vmin",
+        paddingRight: "12vmin",
         position: "fixed",
         textAlign: "center",
         top: "50%",

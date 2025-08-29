@@ -2,7 +2,6 @@ import Plot from "react-plotly.js";
 import SectionTitle from "./sectionTitle";
 
 const ExpressionStats = ({ expressionStats, title }) => {
-  // Transform the data for Plotly
   const emotions = Object.keys(expressionStats || {}).map(
     (emotion) => emotion.charAt(0).toUpperCase() + emotion.slice(1),
   );
@@ -45,6 +44,7 @@ const ExpressionStats = ({ expressionStats, title }) => {
       textfont: {
         size: 12,
         color: "#333",
+        family: "monospace",
       },
       hovertemplate: "%{x} (%{y:.1%})<extra></extra>",
     },
@@ -56,10 +56,12 @@ const ExpressionStats = ({ expressionStats, title }) => {
       titlefont: {
         size: 14,
         color: "#333",
+        family: "monospace",
       },
       tickfont: {
         size: 12,
         color: "#333",
+        family: "monospace",
       },
     },
     yaxis: {
@@ -67,19 +69,21 @@ const ExpressionStats = ({ expressionStats, title }) => {
       titlefont: {
         size: 14,
         color: "#333",
+        family: "monospace",
       },
       tickfont: {
         size: 12,
         color: "#333",
+        family: "monospace",
       },
       range: [0, 1],
       tickformat: ".0%",
     },
     margin: {
-      l: 60,
-      r: 30,
-      t: 60,
-      b: 60,
+      l: 30,
+      r: 20,
+      t: 20,
+      b: 20,
     },
     plot_bgcolor: "rgba(0,0,0,0)",
     paper_bgcolor: "rgba(0,0,0,0)",
@@ -101,25 +105,27 @@ const ExpressionStats = ({ expressionStats, title }) => {
       "autoScale2d",
       "resetScale2d",
     ],
+    scrollZoom: false,
+    editable: false,
+    staticPlot: false,
   };
 
   return (
     <div className="w-full">
-      <SectionTitle title={title} />
-      <div className="w-full p-1">
-        {expressionStats && Object.keys(expressionStats).length > 0 ? (
-          <Plot
-            data={data}
-            layout={layout}
-            config={config}
-            className="w-full"
-          />
-        ) : (
-          <div className="text-center text-gray-500 py-8">
-            No expression data available
-          </div>
-        )}
-      </div>
+      {title && <SectionTitle title={title} />}
+      {expressionStats && Object.keys(expressionStats).length > 0 ? (
+        <Plot
+          data={data}
+          layout={layout}
+          config={config}
+          className="w-full"
+          useResizeHandler={true}
+        />
+      ) : (
+        <div className="text-center text-gray-500 py-8">
+          No expression data available
+        </div>
+      )}
     </div>
   );
 };

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from video_processing import router
+from jwt_authentication import router as access_router
 import asyncio
 from video_processing import delayed_rmtree
 from video_processing import TEMP_BASE
@@ -26,6 +27,7 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/video")
+app.include_router(access_router, prefix="/auth")
 
 @app.get("/")
 def read_root():

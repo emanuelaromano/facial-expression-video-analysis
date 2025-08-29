@@ -111,28 +111,15 @@ if len(model_files) < 3:
     raise RuntimeError(f"Model dir looks empty: {MODEL_DIR} (found {len(model_files)} files)")
 logger.info(f"Model files present: {len(model_files)}")
 
-########################################################
-# Utility functions
-########################################################
-
-# Client disconnect handling
-async def _abort_if_disconnected(request: Request, cancel_event: Event, uuid: str):
-    if await request.is_disconnected():
-        cancel_event.set()
-        path = os.path.join(TEMP_BASE, uuid)
-        if os.path.exists(path):
-            asyncio.create_task(delayed_rmtree(path, 0))
-        asyncio.create_task(asyncio.to_thread(cleanup_status, uuid))
-        raise HTTPException(status_code=499, detail="Client Closed Request")
 
 ########################################################
 # Video processing globals
 ########################################################
 
-FACE_MESH_EVERY = int(os.getenv("FACE_MESH_EVERY", "2"))
-EMOTION_EVERY   = int(os.getenv("EMOTION_EVERY", "10"))
-NUM_WORKERS     = int(os.getenv("NUM_WORKERS", "4"))
-OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "sk-proj-1234567890")
+FACE_MESH_EVERY = int(os.getenv("FACE_MESH_EVERY"))
+EMOTION_EVERY   = int(os.getenv("EMOTION_EVERY"))
+NUM_WORKERS     = int(os.getenv("NUM_WORKERS"))
+OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
 
 # Building the face mesh
 mp_face_mesh = mp.solutions.face_mesh
@@ -309,7 +296,6 @@ def get_signed_upload_url(uuid: str, filename: str):
 
 @router.post("/analyze", status_code=HTTPStatus.OK)
 async def analyze_video(
-    request: Request,
     background_tasks: BackgroundTasks,
     uuid: str = Form(...),
     gcs_path: str = Form(...), 
@@ -357,19 +343,14 @@ async def analyze_video(
             )
 
 
-        await _abort_if_disconnected(request, cancel_event, uuid)
-        
         fps_num, fps_den = get_fps_fraction(temp_og_video_path)
-        await _abort_if_disconnected(request, cancel_event, uuid)
         
         update_status(uuid, "extracting audio", 10)
         audio_path = extract_audio_ffmpeg(temp_og_video_path, temp_audio_path, cancel_event)
         if not audio_path:
             logger.warning("Audio extraction failed - video will be silent")
-        await _abort_if_disconnected(request, cancel_event, uuid)
         
         num_frames = split_video_into_frames(temp_og_video_path, temp_frames_dir, cancel_event)
-        await _abort_if_disconnected(request, cancel_event, uuid)
 
         # Analyze only needed frames
         expressions = {}
@@ -396,7 +377,6 @@ async def analyze_video(
                         for f in futures_map.keys():
                             f.cancel()
                         raise HTTPException(status_code=499, detail="Client Closed Request")
-                    await _abort_if_disconnected(request, cancel_event, uuid)
                     idx = futures_map[future]
                     result = future.result()
                     expressions[str(idx)] = result or {}
@@ -412,8 +392,6 @@ async def analyze_video(
                 except TypeError:
                     pass
 
-        await _abort_if_disconnected(request, cancel_event, uuid)
-
         # Rebuild frames using most recent analyzed indices
         logger.info(f"Starting frame rebuilding process for {num_frames} frames...")
         alpha = 0.4
@@ -423,7 +401,6 @@ async def analyze_video(
         for i in range(num_frames):
             if cancel_event.is_set():
                 raise HTTPException(status_code=499, detail="Client Closed Request")
-            await _abort_if_disconnected(request, cancel_event, uuid)
             mesh_idx = min((i // FACE_MESH_EVERY) * FACE_MESH_EVERY, num_frames - 1)
             emo_idx  = min((i // EMOTION_EVERY)  * EMOTION_EVERY,  num_frames - 1)
 
@@ -465,7 +442,6 @@ async def analyze_video(
             fps_den,
             cancel_event
         )
-        await _abort_if_disconnected(request, cancel_event, uuid)
         
         if not os.path.exists(rebuilt_video_path):
             logger.error("rebuilt video not found at %s", rebuilt_video_path)
@@ -475,10 +451,8 @@ async def analyze_video(
         logger.info(f"Output video size: {os.path.getsize(rebuilt_video_path)} bytes")
 
         # Spoken-content analysis (guard for missing audio)
-        await _abort_if_disconnected(request, cancel_event, uuid)
         update_status(uuid, "transcribing audio", 95)
         analyze_spoken_content(audio_path, scenario_description, analysis_path, cancel_event)
-        await _abort_if_disconnected(request, cancel_event, uuid)
 
         with open(expressions_path, "w") as f:
             json.dump(normalized_expression_stats, f)
@@ -550,15 +524,15 @@ async def analyze_video(
         clear_cancel_event(uuid)
 
 
-@router.post("/question", status_code=HTTPStatus.OK)
-async def generate_interview_question(scenario_description: str = Form(...)):
+@router.post("/transcript", status_code=HTTPStatus.OK)
+async def generate_video_transcript(scenario_description: str = Form(...)):
     try:
-        question = generate_question(scenario_description)
+        transcript = generate_transcript(scenario_description)
         return {
-            "question": question
+            "transcript": transcript
         }
     except Exception as e:
-        logger.exception("unexpected error in generate_interview_question")
+        logger.exception("unexpected error in generate_video_transcript")
         raise Exception(f"Unexpected error: {e}")
 
 ########################################################
@@ -853,7 +827,7 @@ def rebuild_video_ffmpeg(frames_dir: str, audio_path: Optional[str], output_path
     base = [
         "ffmpeg", "-y",
         "-start_number", "0",
-        "-framerate", fps_str,          # exact input rate for the image sequence
+        "-framerate", fps_str,
         "-i", os.path.join(frames_dir, "%d.jpg"),
     ]
 
@@ -981,18 +955,18 @@ def normalize_expression_stats(expression_stats: dict) -> dict:
 # Generate question functions
 ########################################################
 
-class QuestionResponse(BaseModel):
-    question: str = Field(description="The interview question")
+class TranscriptResponse(BaseModel):
+    transcript: str = Field(description="The interview transcript")
 
-def generate_question(scenario_description: str) -> str:
+def generate_transcript(scenario_description: str) -> str:
     response = client.responses.parse(
         model="gpt-4o-mini",
         input=[
             {
                 "role": "system",
-                "content": f"You are a career coach. Generate a possible interview question for the following job description: {scenario_description}",
+                "content": f"You are a speech coach. Generate a possible transcript for a video based on the following scenario description: {scenario_description}",
             },
         ],
-        text_format=QuestionResponse,
+        text_format=TranscriptResponse,
     )
-    return response.output_parsed.question
+    return response.output_parsed.transcript

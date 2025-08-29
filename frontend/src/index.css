@@ -67,7 +67,7 @@ body {
     var(--pink-700) 50%
   );
   animation-direction: alternate-reverse;
-  animation-duration: 5s;
+  animation-duration: 4s;
 }
 
 .bg3 {
@@ -120,6 +120,19 @@ h1 {
     background-color: var(--pink-600);
     color: #fff;
   }
+}
+
+.secondary-button.disabled {
+  cursor: not-allowed;
+  &:hover {
+    transform: none;
+    background-color: white;
+    color: var(--pink-700);
+  }
+}
+
+.disabled {
+  cursor: not-allowed;
 }
 
 .primary-textbox {
