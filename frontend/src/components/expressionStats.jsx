@@ -107,7 +107,7 @@ const ExpressionStats = ({ expressionStats, title }) => {
     ],
     scrollZoom: false,
     editable: false,
-    staticPlot: false,
+    staticPlot: true,
   };
 
   return (

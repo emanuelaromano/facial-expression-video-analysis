@@ -296,6 +296,12 @@ const VideoUpload = () => {
         const data = await response.json();
         console.log("Status update received:", data);
 
+        // Handle "not_started" state gracefully
+        if (!data || !data.state || data.state === "not_started") {
+          window.currentPollInterval = setTimeout(startPolling, 500);
+          return;
+        }
+
         setProgress({ percent: data.progress, state: data.state });
 
         // Continue polling if not complete
@@ -310,12 +316,9 @@ const VideoUpload = () => {
       } catch (error) {
         console.error("Status polling failed:", error);
         // Continue polling on error
-        window.currentPollInterval = setTimeout(startPolling, 2000); // Retry after 2 seconds
+        window.currentPollInterval = setTimeout(startPolling, 2000);
       }
     };
-
-    // Start the first poll
-    startPolling();
 
     try {
       const controller = new AbortController();
@@ -326,6 +329,9 @@ const VideoUpload = () => {
         params: { uuid: videoId, filename: selectedFile.name },
         signal: controller.signal,
       });
+
+      // Start polling *after* the server has initialized status
+      startPolling();
 
       const { url: uploadUrl, gcs_path, headers } = uploadResponse.data;
 

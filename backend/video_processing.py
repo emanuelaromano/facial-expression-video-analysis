@@ -226,7 +226,16 @@ def get_storage_client():
 @router.get("/status/{uuid}")
 async def read_status(uuid: str):
     try:
-        return await get_status(uuid)
+        status = await get_status(uuid)
+        if not isinstance(status, dict):
+            # Normalize: never return None/empty
+            return {"state": "not_started", "progress": 0}
+        # Coerce fields and defaults
+        return {
+            "state": str(status.get("state", "not_started")),
+            "progress": int(float(status.get("progress", 0))) if status.get("progress") is not None else 0,
+            "ts": status.get("ts"),  # optional
+        }
     except Exception as e:
         logger.error(f"Error reading status for {uuid}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to read status: {str(e)}")
@@ -236,6 +245,8 @@ async def read_status(uuid: str):
 async def wait_status(uuid: str, last_progress: int = 0, timeout: int = 30):
     try:
         cur = await get_status(uuid)
+        if not isinstance(cur, dict):
+            cur = {"state": "not_started", "progress": 0}
         if cur.get("progress", 0) > last_progress:
             return cur
 
@@ -256,7 +267,10 @@ async def wait_status(uuid: str, last_progress: int = 0, timeout: int = 30):
         finally:
             await pubsub.close()
         # timeout: return current snapshot
-        return await get_status(uuid)
+        final_status = await get_status(uuid)
+        if not isinstance(final_status, dict):
+            return {"state": "not_started", "progress": 0}
+        return final_status
     except Exception as e:
         logger.error(f"Error in wait_status for {uuid}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to wait for status: {str(e)}")
@@ -282,7 +296,7 @@ async def get_signed_upload_url(uuid: str, filename: str):
     logger.info(f"Generating signed upload URL for uuid: {uuid}, filename: {filename}")
     
     # Set initial status immediately when job is created
-    await set_status(uuid, "uploading", 0)
+    await set_status(uuid, "uploading", 2)
     
     # URL decode the filename in case it comes encoded
     from urllib.parse import unquote
