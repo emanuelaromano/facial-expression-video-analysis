@@ -330,7 +330,7 @@ const VideoUpload = () => {
         signal: controller.signal,
       });
 
-      // Start polling *after* the server has initialized status
+      // Start polling after the server has initialized status
       startPolling();
 
       const { url: uploadUrl, gcs_path, headers } = uploadResponse.data;

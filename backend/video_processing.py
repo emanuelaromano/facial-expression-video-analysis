@@ -296,7 +296,7 @@ async def get_signed_upload_url(uuid: str, filename: str):
     logger.info(f"Generating signed upload URL for uuid: {uuid}, filename: {filename}")
     
     # Set initial status immediately when job is created
-    await set_status(uuid, "uploading", 2)
+    await set_status(uuid, "loading video", 2)
     
     # URL decode the filename in case it comes encoded
     from urllib.parse import unquote
@@ -330,7 +330,7 @@ async def analyze_video(
 ):
     cancel_event = get_cancel_event(uuid)
     await clear_cancel(uuid)
-    await set_status(uuid, "processing", 2)
+    await set_status(uuid, "processing", 5)
     
     temp_dir = os.path.join(TEMP_BASE, uuid)
     temp_og_video_path = os.path.join(temp_dir, "video.mp4")
@@ -347,7 +347,6 @@ async def analyze_video(
         # Create temp folders
         os.makedirs(temp_frames_dir, exist_ok=True)
         os.makedirs(temp_processed_dir, exist_ok=True)
-        await set_status(uuid, "downloading video", 5)
 
         # Get video from GCS and download to temp location
         client = get_storage_client()
