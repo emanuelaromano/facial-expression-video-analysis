@@ -1,10 +1,11 @@
 import os
+import sys
 import shutil
 import cv2
 import logging
 import subprocess
 from dotenv import load_dotenv
-from fastapi import APIRouter, UploadFile, Form, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, UploadFile, Form, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 from http import HTTPStatus
 from transformers import AutoImageProcessor, AutoModelForImageClassification
@@ -12,7 +13,7 @@ import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import mediapipe as mp
 from threading import Lock, Event
-from typing import Optional
+from typing import Optional, Dict
 from openai import OpenAI
 from zipfile import ZipFile, ZIP_DEFLATED
 from fractions import Fraction
@@ -20,7 +21,6 @@ import json
 import asyncio
 from subprocess import Popen, PIPE
 import time
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import glob
 from google.cloud import storage
@@ -28,8 +28,79 @@ from datetime import timedelta
 import google.auth
 from google.auth import impersonated_credentials
 from google.api_core.exceptions import NotFound
+import os
+from redis_stream import set_status, get_status, clear_status, mark_cancel, is_cancelled, clear_cancel, r, _channel
 
 load_dotenv()
+
+########################################################
+# Module initialization guard
+########################################################
+
+_INIT_DONE = False
+
+
+def init_once():
+    """Initialize the module once. Safe to call multiple times."""
+    global _INIT_DONE, mp_face_mesh, face_mesh_model, mp_fd, face_det
+    global emotion_processor, emotion_model, EMOTION_ID2LABEL, client
+    global FACE_MESH_EVERY, EMOTION_EVERY, NUM_WORKERS, OPENAI_API_KEY
+    if _INIT_DONE:
+        return
+    _INIT_DONE = True
+    
+
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    FACE_MESH_EVERY = int(os.getenv("FACE_MESH_EVERY"))
+    EMOTION_EVERY = int(os.getenv("EMOTION_EVERY"))
+    NUM_WORKERS = int(os.getenv("NUM_WORKERS"))
+    
+    # Validate model presence at startup
+    MODEL_DIR = "/opt/models/vit-fer"
+    model_files = [p for p in glob.glob(MODEL_DIR + "/**/*", recursive=True) if os.path.isfile(p)]
+    if len(model_files) < 3:
+        raise RuntimeError(f"Model dir looks empty: {MODEL_DIR} (found {len(model_files)} files)")
+    
+    # Create temp directory
+    os.makedirs(TEMP_BASE, exist_ok=True)
+    
+    # Clear temp directory contents
+    try:
+        if os.path.exists(TEMP_BASE):
+            for name in os.listdir(TEMP_BASE):
+                p = os.path.join(TEMP_BASE, name)
+                if os.path.isfile(p) or os.path.islink(p):
+                    os.unlink(p)
+                elif os.path.isdir(p):
+                    shutil.rmtree(p, ignore_errors=True)
+            logger.info(f"Cleared contents of {TEMP_BASE}")
+    except Exception as e:
+        logger.warning(f"Failed to clear temp directory: {e}")
+    
+    # Initialize MediaPipe models
+    mp_face_mesh = mp.solutions.face_mesh
+    face_mesh_model = mp_face_mesh.FaceMesh(static_image_mode=True, refine_landmarks=True)
+    mp_fd = mp.solutions.face_detection
+    face_det = mp_fd.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+    
+    # Initialize emotion analysis models
+    try:
+        emotion_processor = AutoImageProcessor.from_pretrained(
+            "/opt/models/vit-fer",
+            local_files_only=True
+        )
+        emotion_model = AutoModelForImageClassification.from_pretrained("/opt/models/vit-fer").eval()
+        EMOTION_ID2LABEL = emotion_model.config.id2label
+    except Exception as e:
+        logger.error(f"Failed to load emotion analysis model: {e}")
+        # Set fallback values
+        emotion_processor = None
+        emotion_model = None
+        EMOTION_ID2LABEL = {}
+    
+    # Initialize OpenAI client
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    
 
 ########################################################
 # Delayed cleanup functions
@@ -55,8 +126,8 @@ async def delayed_rmtree(path: str, delay_seconds: int = 30):
 
 async def delayed_cleanup_status(uuid: str, delay_seconds: int = 30):
     await asyncio.sleep(delay_seconds)
-    cleanup_status(uuid)
-    logger.info(f"Cleaned up status for {uuid}")
+    await clear_status(uuid)
+    logger.info(f"Cleaned up Redis status for {uuid}")
 
 ########################################################
 # Video processing globals
@@ -64,7 +135,6 @@ async def delayed_cleanup_status(uuid: str, delay_seconds: int = 30):
 
 TEMP_ROOT = os.getenv("TEMP_ROOT", "/tmp")              
 TEMP_BASE = os.getenv("TEMP_BASE", os.path.join(TEMP_ROOT, "hireview"))
-os.makedirs(TEMP_BASE, exist_ok=True)
 BUCKET = os.getenv("BUCKET", "backend-app-storage")
 PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "hireview-prep-470120")
 TARGET_SA = os.getenv("TARGET_SERVICE_ACCOUNT", "916307297241-compute@developer.gserviceaccount.com")
@@ -95,59 +165,41 @@ def clear_cancel_event(uuid: str) -> None:
 # Logging setup
 ########################################################
 
-# Logging setup
 logger = logging.getLogger("hireview")
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-    logger.addHandler(handler)
+logger.handlers.clear()
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] - %(message)s "
+))
+logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
-
-# Validate model presence at startup
-MODEL_DIR = "/opt/models/vit-fer"
-model_files = [p for p in glob.glob(MODEL_DIR + "/**/*", recursive=True) if os.path.isfile(p)]
-if len(model_files) < 3:
-    raise RuntimeError(f"Model dir looks empty: {MODEL_DIR} (found {len(model_files)} files)")
-logger.info(f"Model files present: {len(model_files)}")
-
 
 ########################################################
 # Video processing globals
 ########################################################
 
-FACE_MESH_EVERY = int(os.getenv("FACE_MESH_EVERY"))
-EMOTION_EVERY   = int(os.getenv("EMOTION_EVERY"))
-NUM_WORKERS     = int(os.getenv("NUM_WORKERS"))
-OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
+# Environment variables (will be parsed in init_once)
+FACE_MESH_EVERY = None
+EMOTION_EVERY = None
+NUM_WORKERS = None
+OPENAI_API_KEY = None
 
-# Building the face mesh
-mp_face_mesh = mp.solutions.face_mesh
-face_mesh_model = mp_face_mesh.FaceMesh(static_image_mode=True, refine_landmarks=True)
+# Global variables for models and clients (initialized in init_once)
+mp_face_mesh = None
+face_mesh_model = None
 mesh_lock = Lock()
 
-# Face detection for emotion analysis
-mp_fd = mp.solutions.face_detection
-face_det = mp_fd.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+mp_fd = None
+face_det = None
 fd_lock = Lock()
 
-# Emotion analysis
-try:
-    emotion_processor = AutoImageProcessor.from_pretrained(
-        "/opt/models/vit-fer",
-        local_files_only=True
-    )
-    emotion_model = AutoModelForImageClassification.from_pretrained("/opt/models/vit-fer").eval()
-    EMOTION_ID2LABEL = emotion_model.config.id2label
-except Exception as e:
-    logger.error(f"Failed to load emotion analysis model: {e}")
-    # Set fallback values
-    emotion_processor = None
-    emotion_model = None
-    EMOTION_ID2LABEL = {}
+emotion_processor = None
+emotion_model = None
+EMOTION_ID2LABEL = {}
 
-# Transcription client
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = None
 
 # Storage client setup for both local and cloud
 def get_storage_client():
@@ -168,113 +220,75 @@ def get_storage_client():
 # SSE Streaming endpoints
 ########################################################
 
-class VideoStream:
-    states = {}
 
-    def __init__(self, uuid: str):
-        pass
 
-    def initialize_status(self, uuid: str):
-        if uuid not in self.states.keys():
-            self.states[uuid] = {
-                "state": "initializing",
-                "progress": 2
-            }
-        else:
-            self.states[uuid]["state"] = "initializing"
-            self.states[uuid]["progress"] = 2
 
-    def update_status(self, uuid: str, state: str, progress: int):
-        self.states[uuid] = {
-            "state": state,
-            "progress": progress
-        }
+@router.get("/status/{uuid}")
+async def read_status(uuid: str):
+    try:
+        return await get_status(uuid)
+    except Exception as e:
+        logger.error(f"Error reading status for {uuid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read status: {str(e)}")
 
-    def get_video_stream(self, uuid: str):
+# Optional: long-poll variant (fewer requests; proxy-safe)
+@router.get("/status/{uuid}/wait")
+async def wait_status(uuid: str, last_progress: int = 0, timeout: int = 30):
+    try:
+        cur = await get_status(uuid)
+        if cur.get("progress", 0) > last_progress:
+            return cur
+
+        pubsub = r.pubsub()
+        await pubsub.subscribe(_channel(uuid))
         try:
-            while self.states[uuid]["progress"] < 100:
-                yield f"data: {json.dumps({'state': self.states[uuid]['state'], 'progress': self.states[uuid]['progress']})}\r\n\r\n".encode("utf-8")
-                time.sleep(2)
-            if self.states[uuid]["progress"] == 100:
-                self.update_status(uuid, "completed", 100)
-                yield f"data: {json.dumps({'state': self.states[uuid]['state'], 'progress': self.states[uuid]['progress']})}\r\n\r\n".encode("utf-8")
-                time.sleep(2)
-        except Exception as e:
-            logger.error(f"Error in video stream for {uuid}: {e}")
-            error_data = {"state": "error", "progress": self.states[uuid]["progress"]}
-            yield f"data: {json.dumps(error_data)}\r\n\r\n".encode("utf-8")
-    
-    def cleanup(self, uuid: str):
-        if uuid in self.states:
-            del self.states[uuid]
-
-def get_video_stream(uuid: str):
-    try:
-        return VideoStream(uuid).get_video_stream(uuid)
+            # wait up to `timeout` seconds for a progress bump
+            end = time.time() + timeout
+            async for msg in pubsub.listen():
+                if msg["type"] != "message":
+                    continue
+                data = json.loads(msg["data"])
+                prog = int(float(data.get("progress", 0)))
+                if prog > last_progress:
+                    return {"state": data["state"], "progress": prog, "ts": data.get("ts")}
+                if time.time() > end:
+                    break
+        finally:
+            await pubsub.close()
+        # timeout: return current snapshot
+        return await get_status(uuid)
     except Exception as e:
-        logger.error(f"Error getting video stream for {uuid}: {e}")
-        return None
-
-def update_status(uuid: str, state: str, progress: int):
-    try:
-        VideoStream(uuid).update_status(uuid, state, progress)
-    except Exception as e:
-        logger.error(f"Error updating status for {uuid}: {e}")
-
-def initialize_status(uuid: str):
-    try:
-        VideoStream(uuid).initialize_status(uuid)
-    except Exception as e:
-        logger.error(f"Error initializing status for {uuid}: {e}")
-
-def cleanup_status(uuid: str):
-    try:
-        VideoStream(uuid).cleanup(uuid)
-    except Exception as e:
-        logger.error(f"Error cleaning up status for {uuid}: {e}")
-
-@router.get("/stream/{uuid}")
-def stream(uuid: str):
-    initialize_status(uuid)
-    return StreamingResponse(
-        get_video_stream(uuid), 
-        media_type="text/event-stream", 
-        headers={
-            "Cache-Control": "no-cache", 
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control"
-        }
-    )
+        logger.error(f"Error in wait_status for {uuid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to wait for status: {str(e)}")
 
 @router.post("/cancel/{uuid}")
 async def cancel_job(uuid: str):
     try:
+        await mark_cancel(uuid)
         ev = get_cancel_event(uuid)
         ev.set()
         asyncio.create_task(delayed_rmtree(os.path.join(TEMP_BASE, uuid), 0))
-        asyncio.create_task(asyncio.to_thread(cleanup_status, uuid))
         return {"ok": True, "cancelled": uuid}
     except Exception as e:
-        logger.warning(f"Cancel request failed for {uuid}: {e}")
-        return {"ok": False, "cancelled": uuid}
+        logger.error(f"Error cancelling job {uuid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel job: {str(e)}")
 
 ########################################################
 # Upload video to GCS
 ########################################################
 
 @router.get("/upload", status_code=HTTPStatus.OK)
-def get_signed_upload_url(uuid: str, filename: str):
+async def get_signed_upload_url(uuid: str, filename: str):
     logger.info(f"Generating signed upload URL for uuid: {uuid}, filename: {filename}")
+    
+    # Set initial status immediately when job is created
+    await set_status(uuid, "uploading", 0)
     
     # URL decode the filename in case it comes encoded
     from urllib.parse import unquote
-    decoded_filename = unquote(filename)
-    logger.info(f"Decoded filename: {decoded_filename}")
-    
+    decoded_filename = unquote(filename)    
     client = get_storage_client()
     blob_path = f"hireview/{uuid}/{decoded_filename}"
-    logger.info(f"Generated blob path: {blob_path}")
     blob = client.bucket(BUCKET).blob(blob_path)
     url = blob.generate_signed_url(
         version="v4",
@@ -282,7 +296,6 @@ def get_signed_upload_url(uuid: str, filename: str):
         method="PUT",
         content_type="application/octet-stream",
     )
-    logger.info(f"Generated signed URL for path: {blob.name}")
     return {
         "url": url, 
         "gcs_path": blob.name,
@@ -301,8 +314,10 @@ async def analyze_video(
     gcs_path: str = Form(...), 
     scenario_description: str = Form(...),
 ):
-    initialize_status(uuid)
     cancel_event = get_cancel_event(uuid)
+    await clear_cancel(uuid)
+    await set_status(uuid, "processing", 2)
+    
     temp_dir = os.path.join(TEMP_BASE, uuid)
     temp_og_video_path = os.path.join(temp_dir, "video.mp4")
     temp_frames_dir = os.path.join(temp_dir, "frames")
@@ -318,13 +333,13 @@ async def analyze_video(
         # Create temp folders
         os.makedirs(temp_frames_dir, exist_ok=True)
         os.makedirs(temp_processed_dir, exist_ok=True)
-        update_status(uuid, "downloading video", 5)
+        await set_status(uuid, "downloading video", 5)
 
         # Get video from GCS and download to temp location
         client = get_storage_client()
         bucket = client.bucket(BUCKET)
         blob = bucket.blob(gcs_path)
-        
+
         try:
             blob.download_to_filename(temp_og_video_path)
             logger.info(f"Successfully downloaded video from GCS: {gcs_path}")
@@ -342,15 +357,15 @@ async def analyze_video(
                 detail=f"Failed to download video from storage: {str(e)}"
             )
 
-
         fps_num, fps_den = get_fps_fraction(temp_og_video_path)
         
-        update_status(uuid, "extracting audio", 10)
         audio_path = extract_audio_ffmpeg(temp_og_video_path, temp_audio_path, cancel_event)
         if not audio_path:
             logger.warning("Audio extraction failed - video will be silent")
         
         num_frames = split_video_into_frames(temp_og_video_path, temp_frames_dir, cancel_event)
+        await set_status(uuid, "analyzing frames", 15)
+
 
         # Analyze only needed frames
         expressions = {}
@@ -359,10 +374,8 @@ async def analyze_video(
             set(range(0, num_frames, FACE_MESH_EVERY)) |
             set(range(0, num_frames, EMOTION_EVERY))
         )
-        
         logger.info(f"Starting analysis of {len(needed_idxs)} frames out of {num_frames} total frames")
         logger.info(f"Face mesh analysis every {FACE_MESH_EVERY} frames, emotion analysis every {EMOTION_EVERY} frames")
-
         with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
             logger.info("Starting frame analysis...")
             futures_map = {
@@ -373,7 +386,7 @@ async def analyze_video(
             try:
                 for future in as_completed(futures_map):
                     # bail out quickly if canceled
-                    if cancel_event.is_set():
+                    if cancel_event.is_set() or await is_cancelled(uuid):
                         for f in futures_map.keys():
                             f.cancel()
                         raise HTTPException(status_code=499, detail="Client Closed Request")
@@ -383,23 +396,31 @@ async def analyze_video(
                     completed += 1
                     if completed % 5 == 0 or completed == len(needed_idxs):
                         progress = int(10 + round(completed/len(needed_idxs) * 30, 0))
-                        update_status(uuid, "analyzing frames", progress)
                         if completed % 10 == 0:
+                            await set_status(uuid, "analyzing frames", progress)
                             logger.info(f"Analyzed {completed}/{len(needed_idxs)} frames ({completed/len(needed_idxs)*100:.1f}%)")
             finally:
                 try:
                     executor.shutdown(wait=False, cancel_futures=True)
                 except TypeError:
                     pass
-
         # Rebuild frames using most recent analyzed indices
         logger.info(f"Starting frame rebuilding process for {num_frames} frames...")
+        await set_status(uuid, "rebuilding frames", 50)
         alpha = 0.4
         last_label = None
         last_conf = None
 
+        # Use bounded concurrency for frame rebuilding
+        sem = asyncio.Semaphore(64)  # tune as needed
+
+        async def _rebuild_task(i, expr):
+            async with sem:
+                await rebuild_frame(i, temp_frames_dir, temp_processed_dir, num_frames, uuid, expr)
+
+        tasks = []
         for i in range(num_frames):
-            if cancel_event.is_set():
+            if cancel_event.is_set() or await is_cancelled(uuid):
                 raise HTTPException(status_code=499, detail="Client Closed Request")
             mesh_idx = min((i // FACE_MESH_EVERY) * FACE_MESH_EVERY, num_frames - 1)
             emo_idx  = min((i // EMOTION_EVERY)  * EMOTION_EVERY,  num_frames - 1)
@@ -425,15 +446,31 @@ async def analyze_video(
                 "emotion": label,
                 "confidence": conf,
             }
-            rebuild_frame(i, temp_frames_dir, temp_processed_dir, num_frames, uuid, final_expression)
+            tasks.append(asyncio.create_task(_rebuild_task(i, final_expression)))
+
+        # Wait for all frame rebuilding tasks to complete
+        await asyncio.gather(*tasks)
 
         logger.info(f"Frame rebuilding completed. Starting video reconstruction...")
+        await set_status(uuid, "rebuilding video", 90)
+        
+        # Fail fast if frames are missing before calling ffmpeg
+        missing = []
+        for i in range(num_frames):
+            p = os.path.join(temp_processed_dir, f"{i}.jpg")
+            if not (os.path.exists(p) and os.path.getsize(p) > 0):
+                missing.append(i)
+
+        if missing:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Processed frames missing or empty: {missing[:10]}{'...' if len(missing)>10 else ''}"
+            )
         
         # Normalize expression stats
         normalized_expression_stats = normalize_expression_stats(expression_stats)
 
         # Rebuild video
-        update_status(uuid, "rebuilding video", 90)
         rebuilt_video_path = rebuild_video_ffmpeg(
             temp_processed_dir,
             audio_path,
@@ -449,16 +486,15 @@ async def analyze_video(
         
         logger.info(f"Video reconstruction completed successfully: {rebuilt_video_path}")
         logger.info(f"Output video size: {os.path.getsize(rebuilt_video_path)} bytes")
-
         # Spoken-content analysis (guard for missing audio)
-        update_status(uuid, "transcribing audio", 95)
+        await set_status(uuid, "transcribing audio", 95)
         analyze_spoken_content(audio_path, scenario_description, analysis_path, cancel_event)
-
+        await set_status(uuid, "saving analysis", 98)
         with open(expressions_path, "w") as f:
             json.dump(normalized_expression_stats, f)
 
         # Bundle video + analysis into a ZIP
-        if cancel_event.is_set():
+        if cancel_event.is_set() or await is_cancelled(uuid):
             raise HTTPException(status_code=499, detail="Client Closed Request")
             
         with ZipFile(bundle_path, "w", compression=ZIP_DEFLATED) as zf:
@@ -490,13 +526,11 @@ async def analyze_video(
         
         logger.info(f"Analysis complete for video {uuid}. Bundle created: {bundle_path}")
         logger.info(f"Bundle size: {bundle_size} bytes")
-        update_status(uuid, "completed", 100)
         
         # Verify ZIP file integrity
         try:
             with ZipFile(bundle_path, 'r') as test_zip:
                 file_list = test_zip.namelist()
-                logger.info(f"ZIP contents: {file_list}")
                 if f"processed_video.mp4" not in file_list or "spoken_content_analysis.txt" not in file_list:
                     logger.error(f"ZIP file missing required contents: {file_list}")
                     raise HTTPException(status_code=500, detail="Output bundle is corrupted")
@@ -504,6 +538,9 @@ async def analyze_video(
             logger.error(f"ZIP file validation failed: {e}")
             raise HTTPException(status_code=500, detail="Output bundle validation failed")
 
+        # Finalize
+        await set_status(uuid, "completed", 100)
+        
         # Cleanup AFTER response is sent
         background_tasks.add_task(delayed_rmtree, temp_dir, 30)
         # Also cleanup status after a delay to ensure streaming is complete
@@ -517,6 +554,11 @@ async def analyze_video(
 
     except Exception as e:
         logger.exception("unexpected error in analyze_video")
+        # report error status
+        try: 
+            await set_status(uuid, "error", (await get_status(uuid)).get("progress", 0))
+        except: 
+            pass
         # Best effort: if a partially created bundle exists, return a 500 instead of streaming it
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
     finally:
@@ -659,7 +701,7 @@ def face_mesh_analysis(frame_path: str, frame_index: int):
     return faces
 
 
-def rebuild_frame(
+async def rebuild_frame(
     frame_index: int,
     temp_frames_dir: str,
     temp_processed_dir: str,
@@ -669,8 +711,8 @@ def rebuild_frame(
 ) -> None:
     # Only log every 10th frame to reduce log noise, but always log the last frame
     if frame_index % 5 == 0 or frame_index == num_frames - 1:
-        update_status(uuid, "rebuilding frames", int(round(40 + frame_index * 30 / num_frames, 0)))
         if frame_index % 10 == 0:
+            await set_status(uuid, "rebuilding frames", int(50 + round(frame_index/num_frames * 40, 0)))
             logger.info(f"Rebuilding frame {frame_index + 1}/{num_frames}")
     
     frame_path = os.path.join(temp_frames_dir, f"{frame_index}.jpg")
@@ -839,9 +881,8 @@ def rebuild_video_ffmpeg(frames_dir: str, audio_path: Optional[str], output_path
             "-vsync", "cfr",
             "-r", fps_str,
             "-c:a", "copy",
+            "-shortest",  # Handle potential audio/video length mismatches
         ]
-        if not keep_all_frames:
-            cmd += ["-shortest"]
         cmd += [output_path]
     else:
         cmd = base + [
@@ -869,14 +910,14 @@ def rebuild_video_ffmpeg(frames_dir: str, audio_path: Optional[str], output_path
             ret = proc.poll()
             if ret is not None:
                 if ret != 0:
-                    # read a small chunk of stderr for logs
-                    err = (proc.stderr.read() or b"").decode(errors="ignore")[:400]
+                    # read more of stderr for better debugging (using tail for actionable errors)
+                    err = (proc.stderr.read() or b"").decode(errors="ignore")[-4000:]
                     logger.error(f"ffmpeg video rebuild failed (code {ret}): {err}")
                     raise RuntimeError("ffmpeg failed")
                 break
             # brief sleep to avoid busy-wait
             time_sleep = 0.05
-            import time; time.sleep(time_sleep)
+            time.sleep(time_sleep)
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
             raise RuntimeError(f"Output video not created: {output_path}")
         return output_path

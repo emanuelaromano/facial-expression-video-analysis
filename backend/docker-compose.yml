@@ -1,4 +1,14 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: hireview-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
   app:
     container_name: hireview-backend
     ports:
@@ -14,12 +24,20 @@ services:
       - PYTHONUNBUFFERED=1
       - FACE_MESH_EVERY=2
       - EMOTION_EVERY=10
-      - NUM_WORKERS=4
+      - NUM_WORKERS=1
       - PORT=8080
       - GOOGLE_CLOUD_PROJECT=hireview-prep-470120
       - TARGET_SERVICE_ACCOUNT=916307297241-compute@developer.gserviceaccount.com
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
-      - ./:/app
     platform: linux/amd64
-    command: uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8080 --no-access-log --log-level info
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+
+

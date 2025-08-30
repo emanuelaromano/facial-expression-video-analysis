@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { setBannerThunk } from "../redux/slices/videoSlice";
 import { useDispatch } from "react-redux";
@@ -69,6 +68,12 @@ const VideoUpload = () => {
       fetch(`/api/video/cancel/${videoId}`, { method: "POST" }).catch(() => {});
     }
 
+    // Clear any ongoing polling
+    if (window.currentPollInterval) {
+      clearTimeout(window.currentPollInterval);
+      window.currentPollInterval = null;
+    }
+
     stopMediaStream();
     setSelectedFile(null);
     setWasRecorded(false);
@@ -110,6 +115,11 @@ const VideoUpload = () => {
           () => {},
         );
         setAnalyzing(false);
+        // Clear any ongoing polling
+        if (window.currentPollInterval) {
+          clearTimeout(window.currentPollInterval);
+          window.currentPollInterval = null;
+        }
       }
       resetVideoState();
       const file = e.target.files[0];
@@ -130,6 +140,11 @@ const VideoUpload = () => {
     if (analyzing && analysisAbortRef.current) {
       analysisAbortRef.current.abort();
       setAnalyzing(false);
+      // Clear any ongoing polling
+      if (window.currentPollInterval) {
+        clearTimeout(window.currentPollInterval);
+        window.currentPollInterval = null;
+      }
     }
 
     if (fileInputRef.current) {
@@ -145,6 +160,11 @@ const VideoUpload = () => {
       // Fire-and-forget server-side cancel
       fetch(`/api/video/cancel/${videoId}`, { method: "POST" }).catch(() => {});
       setAnalyzing(false);
+      // Clear any ongoing polling
+      if (window.currentPollInterval) {
+        clearTimeout(window.currentPollInterval);
+        window.currentPollInterval = null;
+      }
     }
 
     if (fileInputRef.current) {
@@ -269,27 +289,33 @@ const VideoUpload = () => {
     setProcessedVideoUrl(null);
     setTranscriptAnalysis(null);
 
-    // Create EventSource for streaming updates
-    const eventSource = new EventSource(`/api/video/stream/${videoId}`);
+    // Start polling for status updates
+    const startPolling = async () => {
+      try {
+        const response = await fetch(`/api/video/status/${videoId}`);
+        const data = await response.json();
+        console.log("Status update received:", data);
 
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log("SSE message received:", data);
-      setTimeout(
-        () => setProgress({ percent: data.progress, state: data.state }),
-        100,
-      );
+        setProgress({ percent: data.progress, state: data.state });
+
+        // Continue polling if not complete
+        if (data.state !== "completed" && data.state !== "error") {
+          window.currentPollInterval = setTimeout(startPolling, 1000); // Poll every 1 second
+        } else {
+          // Analysis complete, stop polling
+          setAnalyzing(false);
+          analysisAbortRef.current = null;
+          window.currentPollInterval = null;
+        }
+      } catch (error) {
+        console.error("Status polling failed:", error);
+        // Continue polling on error
+        window.currentPollInterval = setTimeout(startPolling, 2000); // Retry after 2 seconds
+      }
     };
 
-    eventSource.onerror = () => {
-      console.error("EventSource error:", eventSource.error);
-      eventSource.close();
-    };
-
-    eventSource.onerror = (error) => {
-      console.error("EventSource error:", error);
-      eventSource.close();
-    };
+    // Start the first poll
+    startPolling();
 
     try {
       const controller = new AbortController();
@@ -307,9 +333,6 @@ const VideoUpload = () => {
         dispatch(setBannerThunk("Error uploading video", "error"));
         throw new Error("Upload URL or GCS path not found");
       }
-
-      console.log("uploadUrl", uploadUrl);
-      console.log("gcs_path", gcs_path);
 
       // Upload file directly to GCS
       const uploadResult = await fetch(uploadUrl, {
@@ -374,13 +397,14 @@ const VideoUpload = () => {
         console.error("Analysis failed:", err);
         dispatch(setBannerThunk("Analysis failed.", "error"));
       }
-      // Close EventSource on error
-      eventSource.close();
     } finally {
       setAnalyzing(false);
       analysisAbortRef.current = null;
-      // Close the EventSource
-      eventSource.close();
+      // Clear polling interval
+      if (window.currentPollInterval) {
+        clearTimeout(window.currentPollInterval);
+        window.currentPollInterval = null;
+      }
     }
   }, [selectedFile, videoId, dispatch, scenario]);
 
@@ -404,6 +428,11 @@ const VideoUpload = () => {
   useEffect(() => {
     return () => {
       analysisAbortRef.current?.abort();
+      // Clear any ongoing polling
+      if (window.currentPollInterval) {
+        clearTimeout(window.currentPollInterval);
+        window.currentPollInterval = null;
+      }
       // Clean up processed video URL
       if (processedVideoUrl) {
         URL.revokeObjectURL(processedVideoUrl);
@@ -636,67 +665,69 @@ const VideoUpload = () => {
       )}
       {selectedFile && currentSectionIndex === 2 && (
         <div
-          className={`flex w-[65%] max-h-[calc(80vh)] absolute top-[50%] flex-col justify-center items-center gap-4 transition-all duration-500 ease-in-out
+          className={`flex w-[65%] max-h-[70vh] absolute top-[50%] flex-col justify-center items-center gap-4 transition-all duration-500 ease-in-out
           ${currentSectionIndex === 2 ? "left-[50%] translate-x-[-50%] translate-y-[-50%]" : "left-[150%] translate-x-[-50%] translate-y-[-50%]"}`}
         >
-          <div className="w-full relative bg-transparent border-gray-300 flex justify-center items-center rounded-[0.25rem] max-h-[80vh]">
-            <video
-              key={videoUrl}
-              controls
-              className="max-h-[80vh] max-w-full object-contain rounded-[0.25rem]"
-              src={videoUrl}
-            />
-            <div className="absolute top-2 right-2 flex flex-col gap-2">
-              <div className="relative flex group">
-                <X
-                  onClick={resetVideoState}
-                  className="w-8 h-8 cursor-pointer font-mono text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-[0.25rem] p-1"
-                />
-                <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
-                  Close
-                </p>
-              </div>
-
-              {!analyzing && wasRecorded && (
+          <div className="w-full relative bg-transparent border-gray-300 flex justify-center items-center rounded-[0.25rem] max-h-[70vh]">
+            <div className="relative flex flex-col gap-4">
+              <video
+                key={videoUrl}
+                controls
+                className="max-h-[70vh] max-w-full object-contain rounded-[0.25rem]"
+                src={videoUrl}
+              />
+              <div className="absolute top-2 right-2 flex flex-col gap-2">
                 <div className="relative flex group">
-                  <RotateCcw
-                    onClick={handleRecordVideo}
-                    className="w-8 h-8 cursor-pointer text-white bg-orange-500 hover:bg-orange-700 rounded-[0.25rem] p-2"
+                  <X
+                    onClick={resetVideoState}
+                    className="w-8 h-8 cursor-pointer font-mono text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-[0.25rem] p-1"
                   />
                   <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
-                    Record Again
+                    Close
                   </p>
+                </div>
+
+                {!analyzing && wasRecorded && (
+                  <div className="relative flex group">
+                    <RotateCcw
+                      onClick={handleRecordVideo}
+                      className="w-8 h-8 cursor-pointer text-white bg-orange-500 hover:bg-orange-700 rounded-[0.25rem] p-1"
+                    />
+                    <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
+                      Record Again
+                    </p>
+                  </div>
+                )}
+              </div>
+              {!analyzing && (
+                <button
+                  onClick={handleRunAnalysis}
+                  className="secondary-button w-full"
+                >
+                  Run Analysis
+                </button>
+              )}
+              {analyzing && (
+                <div className="relative w-full">
+                  <button className="secondary-button w-full disabled cursor-not-allowed">
+                    {progress.state.slice(0, 1).toUpperCase() +
+                      progress.state.slice(1)}{" "}
+                    ({progress.percent}%)
+                  </button>
+                  <div
+                    style={{
+                      clipPath: `inset(0 ${100 - progress.percent}% 0 0)`,
+                    }}
+                    className={`absolute disabled top-0 text-center flex items-center justify-center text-white left-0 bottom-0 right-0 !bg-[var(--pink-700)]`}
+                  >
+                    {progress.state.slice(0, 1).toUpperCase() +
+                      progress.state.slice(1)}{" "}
+                    ({progress.percent}%)
+                  </div>
                 </div>
               )}
             </div>
           </div>
-          {analyzing && (
-            <div className="relative w-full">
-              <button className="secondary-button w-full disabled cursor-not-allowed">
-                {progress.state.slice(0, 1).toUpperCase() +
-                  progress.state.slice(1)}{" "}
-                ({progress.percent}%)
-              </button>
-              <div
-                style={{
-                  clipPath: `inset(0 ${100 - progress.percent}% 0 0)`,
-                }}
-                className={`absolute disabled top-0 text-center flex items-center justify-center text-white left-0 bottom-0 right-0 !bg-[var(--pink-700)]`}
-              >
-                {progress.state.slice(0, 1).toUpperCase() +
-                  progress.state.slice(1)}{" "}
-                ({progress.percent}%)
-              </div>
-            </div>
-          )}
-          {!analyzing && (
-            <button
-              onClick={handleRunAnalysis}
-              className="secondary-button w-full"
-            >
-              Run Analysis
-            </button>
-          )}
         </div>
       )}
       {!selectedFile && currentSectionIndex === 2 && recordVideo && (
@@ -752,7 +783,7 @@ const VideoUpload = () => {
                     />
                     <X
                       onClick={() => setTranscript("")}
-                      className="absolute top-0 right-0 w-6 h-6 cursor-pointer text-white bg-black/50 hover:bg-black/70 rounded-[0.25rem] p-1"
+                      className="absolute top-0 right-0 w-6 h-6 cursor-pointer text-white bg-transparent rounded-[0.25rem] p-1"
                     />
                   </div>
                 </div>
@@ -824,7 +855,10 @@ const VideoUpload = () => {
           }}
         >
           <X
-            onClick={resetVideoState}
+            onClick={() => {
+              resetVideoState();
+              navigate("/");
+            }}
             className="w-8 h-8 cursor-pointer absolute top-2 right-2 font-mono text-[var(--pink-500)] bg-white hover:text-[var(--pink-700)] p-1"
           />
           <div className="flex flex-col w-full items-center justify-center">
@@ -852,7 +886,7 @@ const VideoUpload = () => {
               <video
                 key={videoUrl}
                 controls
-                className="max-h-[80vh] max-w-full object-contain rounded-[0.25rem]"
+                className="max-h-[70vh] max-w-full object-contain rounded-[0.25rem]"
                 src={videoUrl}
               />
             </div>

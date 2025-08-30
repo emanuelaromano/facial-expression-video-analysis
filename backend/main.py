@@ -1,19 +1,30 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from video_processing import router
+from video_processing import router, init_once
 from jwt_authentication import router as access_router
-import asyncio
-from video_processing import delayed_rmtree
-from video_processing import TEMP_BASE
 from contextlib import asynccontextmanager
+import logging
+import sys, os
+sys.stderr = open(os.devnull, 'w')
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    asyncio.create_task(delayed_rmtree(TEMP_BASE, 0))
+async def lifespan(app: FastAPI):
+    # Initialize the video processing module once
+    logger = logging.getLogger("hireview")    
+    if not getattr(app.state, "inited", False):
+        init_once()
+        app.state.inited = True
+    else:
+        logger.info("Already initialized, skipping initialization")
     yield
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+)
 
+# CORS middleware with streaming-friendly headers
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

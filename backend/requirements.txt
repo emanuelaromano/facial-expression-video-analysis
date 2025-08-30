@@ -9,3 +9,4 @@ transformers==4.44.2
 safetensors==0.4.4
 google-cloud-storage==3.3.0
 PyJWT==2.10.1
+redis==6.4.0
