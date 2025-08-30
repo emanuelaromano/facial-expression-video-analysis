@@ -10,7 +10,10 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # Initialize Redis client
 try:
-    r = redis.from_url(REDIS_URL, decode_responses=True)
+    r = redis.from_url(
+        REDIS_URL,
+        decode_responses=True,  
+    )
     logger.info(f"Redis client initialized with URL: {REDIS_URL}")
 except Exception as e:
     logger.error(f"Failed to initialize Redis client: {e}")

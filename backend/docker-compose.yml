@@ -28,7 +28,6 @@ services:
       - PORT=8080
       - GOOGLE_CLOUD_PROJECT=hireview-prep-470120
       - TARGET_SERVICE_ACCOUNT=916307297241-compute@developer.gserviceaccount.com
-      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
     platform: linux/amd64
