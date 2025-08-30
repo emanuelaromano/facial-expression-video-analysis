@@ -12,6 +12,7 @@ import LandingPage from "./views/landingPage";
 import VideoUpload from "./views/videoUpload";
 import NotFound from "./views/notFound";
 import AuthPage from "./views/authPage";
+import { API_URL } from "../api";
 
 function RequireAuth({ status, children }) {
   return status === "validated" ? children : <Navigate to="/" replace />;
@@ -28,7 +29,7 @@ function App() {
         return;
       }
       try {
-        const res = await axios.get("/api/auth/validate", {
+        const res = await axios.get(`${API_URL}/auth/validate`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.data?.validated) {
@@ -56,7 +57,7 @@ function App() {
                 <LandingPage />
               ) : authStatus === "checking" ? (
                 <div className="flex justify-center items-center h-screen">
-                  <div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-gray-900" />
+                  <div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-white" />
                 </div>
               ) : (
                 <AuthPage setAuthStatus={setAuthStatus} />
@@ -65,7 +66,7 @@ function App() {
           />
 
           <Route
-            path="video"
+            path="video-upload"
             element={
               <RequireAuth status={authStatus}>
                 <VideoUpload />

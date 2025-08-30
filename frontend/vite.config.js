@@ -9,11 +9,11 @@ export default defineConfig({
   server: {
     proxy: {
       // Your HTTP API
-      "/api/video": {
+      "/video": {
         target: API_URL,
         changeOrigin: true,
       },
-      "/api/auth": {
+      "/auth": {
         target: API_URL,
         changeOrigin: true,
       },

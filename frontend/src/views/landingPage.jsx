@@ -37,7 +37,7 @@ const LandingPage = () => {
   }, [imageOrder, isMounted]);
 
   const handleTryDemo = () => {
-    navigate("/video");
+    navigate("/video-upload");
   };
 
   return (

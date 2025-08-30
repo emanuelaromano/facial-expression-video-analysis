@@ -22,6 +22,7 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
+    root_path="/api",
 )
 
 # CORS middleware with streaming-friendly headers
@@ -37,8 +38,8 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-app.include_router(router, prefix="/api/video")
-app.include_router(access_router, prefix="/api/auth")
+app.include_router(router, prefix="/video")
+app.include_router(access_router, prefix="/auth")
 
 @app.get("/")
 def read_root():

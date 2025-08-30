@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { useDispatch } from "react-redux";
 import { setBannerThunk } from "../redux/slices/videoSlice";
+import { API_URL } from "../../api";
 
 const images = [martinLutherKing, johnKennedy, winstonChurchill, steveJobs];
 
@@ -41,9 +42,10 @@ const AuthPage = ({ setAuthStatus }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.get("/api/auth/validate", {
+      const res = await axios.get(`${API_URL}/auth/validate`, {
         headers: { Authorization: `Bearer ${accessCode}` },
       });
+      console.log({ response: res });
       if (res.data.validated) {
         localStorage.setItem("token", accessCode);
         setAuthStatus("validated");
@@ -100,7 +102,10 @@ const AuthPage = ({ setAuthStatus }) => {
             .
           </div>
         </div>
-        <div className="flex flex-col items-center justify-center gap-3">
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-col items-center justify-center gap-3"
+        >
           <input
             type="password"
             className="primary-textbox text-sm w-full h-[3rem] p-1 text-left resize-none flex items-center justify-center "
@@ -110,10 +115,10 @@ const AuthPage = ({ setAuthStatus }) => {
             spellCheck={false}
             autoComplete="off"
           />
-          <button onClick={handleSubmit} className="primary-button w-full">
+          <button type="submit" className="primary-button w-full">
             Submit
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );

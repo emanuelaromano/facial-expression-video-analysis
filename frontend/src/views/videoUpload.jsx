@@ -9,6 +9,7 @@ import { Play, Square, RotateCcw, ChevronLeft, X, Grip } from "lucide-react";
 import ExpressionStats from "../components/expressionStats";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { API_URL } from "../../api";
 
 const VideoUpload = () => {
   const dispatch = useDispatch();
@@ -65,7 +66,9 @@ const VideoUpload = () => {
     if (analysisAbortRef.current) {
       // If analysis is running, abort it first
       analysisAbortRef.current.abort();
-      fetch(`/api/video/cancel/${videoId}`, { method: "POST" }).catch(() => {});
+      fetch(`${API_URL}/video/cancel/${videoId}`, { method: "POST" }).catch(
+        () => {},
+      );
     }
 
     // Clear any ongoing polling
@@ -111,7 +114,7 @@ const VideoUpload = () => {
       if (analyzing && analysisAbortRef.current) {
         analysisAbortRef.current.abort();
         // Fire-and-forget server-side cancel
-        fetch(`/api/video/cancel/${videoId}`, { method: "POST" }).catch(
+        fetch(`${API_URL}/video/cancel/${videoId}`, { method: "POST" }).catch(
           () => {},
         );
         setAnalyzing(false);
@@ -158,7 +161,9 @@ const VideoUpload = () => {
     if (analyzing && analysisAbortRef.current) {
       analysisAbortRef.current.abort();
       // Fire-and-forget server-side cancel
-      fetch(`/api/video/cancel/${videoId}`, { method: "POST" }).catch(() => {});
+      fetch(`${API_URL}/video/cancel/${videoId}`, { method: "POST" }).catch(
+        () => {},
+      );
       setAnalyzing(false);
       // Clear any ongoing polling
       if (window.currentPollInterval) {
@@ -292,7 +297,7 @@ const VideoUpload = () => {
     // Start polling for status updates
     const startPolling = async () => {
       try {
-        const response = await fetch(`/api/video/status/${videoId}`);
+        const response = await fetch(`${API_URL}/video/status/${videoId}`);
         const data = await response.json();
         console.log("Status update received:", data);
 
@@ -325,7 +330,7 @@ const VideoUpload = () => {
       analysisAbortRef.current = controller;
 
       // Get signed upload URL
-      const uploadResponse = await axios.get(`/api/video/upload`, {
+      const uploadResponse = await axios.get(`${API_URL}/video/upload`, {
         params: { uuid: videoId, filename: selectedFile.name },
         signal: controller.signal,
       });
@@ -359,7 +364,7 @@ const VideoUpload = () => {
       formData.append("gcs_path", gcs_path);
       formData.append("scenario_description", scenario);
 
-      const response = await axios.post(`/api/video/analyze`, formData, {
+      const response = await axios.post(`${API_URL}/video/analyze`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         responseType: "blob",
         signal: controller.signal,
@@ -458,7 +463,10 @@ const VideoUpload = () => {
     formData.append("scenario_description", scenario);
 
     try {
-      const response = await axios.post(`/api/video/transcript`, formData);
+      const response = await axios.post(
+        `${API_URL}/video/transcript`,
+        formData,
+      );
       if (
         response.status < 200 ||
         response.status >= 300 ||
