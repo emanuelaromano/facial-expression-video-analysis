@@ -956,7 +956,7 @@ def normalize_expression_stats(expression_stats: dict) -> dict:
 ########################################################
 
 class TranscriptResponse(BaseModel):
-    transcript: str = Field(description="The interview transcript")
+    transcript: str = Field(description="The transcript of the speech")
 
 def generate_transcript(scenario_description: str) -> str:
     response = client.responses.parse(
@@ -964,8 +964,7 @@ def generate_transcript(scenario_description: str) -> str:
         input=[
             {
                 "role": "system",
-                "content": f"You are a speech coach. The user is practicing a speech. 
-                The scenario description is: {scenario_description}. Write a transcript of the speech in the user's own words.",
+                "content": f"You are a speech coach. The user is practicing a speech. The scenario description is: {scenario_description}. Write a transcript of the speech in the user's own words.",
             },
         ],
         text_format=TranscriptResponse,

@@ -64,12 +64,12 @@ def create_admin_token() -> str:
 # API Endpoints
 ########################################################
 
-@router.post("/validate", status_code=HTTPStatus.OK)
+@router.get("/validate", status_code=HTTPStatus.OK)
 def validate_token_endpoint(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
     if not credentials or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
     payload = decode_token(credentials.credentials)
-    return {"valid": bool(payload)} 
+    return {"validated": bool(payload)} 
 
 @router.post("/create/guest", status_code=HTTPStatus.OK)
 def create_guest_token_endpoint():

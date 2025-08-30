@@ -3,13 +3,15 @@ import martinLutherKing from "../assets/martin-luther-king.png";
 import winstonChurchill from "../assets/winston-churchill.jpg";
 import steveJobs from "../assets/steve-jobs.jpg";
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import axios from "axios";
+import { useDispatch } from "react-redux";
+import { setBannerThunk } from "../redux/slices/videoSlice";
 
 const images = [martinLutherKing, johnKennedy, winstonChurchill, steveJobs];
 
-const LandingPage = () => {
-  const navigate = useNavigate();
-
+const AuthPage = ({ setAuthStatus }) => {
+  const dispatch = useDispatch();
+  const [accessCode, setAccessCode] = useState("");
   const [imageOrder, setImageOrder] = useState(images.map((_, index) => index));
   const [isMounted, setIsMounted] = useState({
     status: false,
@@ -36,8 +38,20 @@ const LandingPage = () => {
     return () => clearInterval(interval);
   }, [imageOrder, isMounted]);
 
-  const handleTryDemo = () => {
-    navigate("/video");
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await axios.get("/api/auth/validate", {
+        headers: { Authorization: `Bearer ${accessCode}` },
+      });
+      if (res.data.validated) {
+        localStorage.setItem("token", accessCode);
+        setAuthStatus("validated");
+      }
+    } catch (error) {
+      console.log(error);
+      dispatch(setBannerThunk("Access code was not validated", "error"));
+    }
   };
 
   return (
@@ -60,8 +74,8 @@ const LandingPage = () => {
           boxSizing: "border-box",
           left: "50%",
           padding: "8vmin",
-          paddingLeft: "12vmin",
-          paddingRight: "12vmin",
+          paddingLeft: "5vmin",
+          paddingRight: "5vmin",
           position: "fixed",
           textAlign: "center",
           top: "50%",
@@ -73,15 +87,36 @@ const LandingPage = () => {
         }}
       >
         <div className="flex flex-col items-center justify-center gap-3">
-          <div className="text-lg font-bold">Get Started</div>
-          <div>Learn to Speak Like a Leader</div>
+          <div className="text-lg font-bold">We're in Beta</div>
+          <div>If you have an access code, please enter it below.</div>
+          <div>
+            To request one, please{" "}
+            <a
+              href="mailto:emanuela.romano.1998@gmail.com"
+              className="text-blue-600 underline"
+            >
+              contact us
+            </a>
+            .
+          </div>
         </div>
-        <button className="primary-button" onClick={handleTryDemo}>
-          Try the Demo
-        </button>
+        <div className="flex flex-col items-center justify-center gap-3">
+          <input
+            type="password"
+            className="primary-textbox text-sm w-full h-[3rem] p-1 text-left resize-none flex items-center justify-center "
+            placeholder="Access Code"
+            value={accessCode}
+            onChange={(e) => setAccessCode(e.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <button onClick={handleSubmit} className="primary-button w-full">
+            Submit
+          </button>
+        </div>
       </div>
     </div>
   );
 };
 
-export default LandingPage;
+export default AuthPage;
