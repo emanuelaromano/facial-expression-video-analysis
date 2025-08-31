@@ -1,16 +1,15 @@
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from video_processing import router, init_once
 from jwt_authentication import router as access_router
 from contextlib import asynccontextmanager
-import logging
-import sys, os
-sys.stderr = open(os.devnull, 'w')
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize the video processing module once
-    logger = logging.getLogger("hireview")    
+    logger = logging.getLogger("hireview")   
+
     if not getattr(app.state, "inited", False):
         init_once()
         app.state.inited = True

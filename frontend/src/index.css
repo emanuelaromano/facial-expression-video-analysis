@@ -149,3 +149,7 @@ h1 {
     border-color: var(--pink-600);
   }
 }
+
+.prose p {
+  margin-bottom: 1.5rem !important;
+}

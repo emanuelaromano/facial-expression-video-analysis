@@ -68,15 +68,24 @@ def create_admin_token() -> str:
 def validate_token_endpoint(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
     if not credentials or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
-    payload = decode_token(credentials.credentials)
-    return {"validated": bool(payload)} 
+    try:
+        payload = decode_token(credentials.credentials)
+        return {"validated": bool(payload)} 
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Token validation failed: " + str(e))
 
 @router.post("/create/guest", status_code=HTTPStatus.OK)
-def create_guest_token_endpoint():
+def create_guest_token_endpoint(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    if credentials.credentials != ADMIN_SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Invalid admin secret key")
     return {"token": create_guest_token()}
 
 @router.post("/create/admin", status_code=HTTPStatus.OK)
-def create_admin_token_endpoint(x_admin_secret: str = Header(None, alias="x-admin-secret")):
-    if not x_admin_secret or x_admin_secret != ADMIN_SECRET_KEY:
+def create_admin_token_endpoint(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    if credentials.credentials != ADMIN_SECRET_KEY:
         raise HTTPException(status_code=401, detail="Invalid admin secret key")
     return {"token": create_admin_token()}

@@ -89,8 +89,10 @@ const AuthPage = ({ setAuthStatus }) => {
         }}
       >
         <div className="flex flex-col items-center justify-center gap-3">
-          <div className="text-lg font-bold">We're Testing</div>
-          <div>If you have an access code, please enter it below.</div>
+          <div className="text-lg font-bold">Coming Soon</div>
+          <div>
+            If you have an access code for testing, please enter it below.
+          </div>
           <div>
             To request one, please{" "}
             <a

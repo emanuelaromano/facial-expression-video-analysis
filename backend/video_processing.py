@@ -1,5 +1,3 @@
-import os
-import sys
 import shutil
 import cv2
 import logging
@@ -166,15 +164,6 @@ def clear_cancel_event(uuid: str) -> None:
 ########################################################
 
 logger = logging.getLogger("hireview")
-logger.handlers.clear()
-
-handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(logging.Formatter(
-    "%(asctime)s [%(levelname)s] - %(message)s "
-))
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
-logger.propagate = False
 
 ########################################################
 # Video processing globals

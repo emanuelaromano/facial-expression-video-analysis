@@ -66,7 +66,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TRANSFORMERS_NO_TF=1 \
     TRANSFORMERS_NO_FLAX=1 \
     PIP_INDEX_URL=https://pypi.org/simple \
-    PIP_EXTRA_INDEX_URL=
+    PIP_EXTRA_INDEX_URL= 
 
 # System dependencies
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list \
@@ -101,4 +101,4 @@ RUN set -e; \
 COPY . /app
 
 ENV PORT=8080
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --no-access-log --log-level info"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --no-access-log --log-level info --use-colors"]

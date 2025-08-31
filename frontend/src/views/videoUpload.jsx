@@ -5,7 +5,15 @@ import { useNavigate } from "react-router-dom";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import JSZip from "jszip";
-import { Play, Square, RotateCcw, ChevronLeft, X, Grip } from "lucide-react";
+import {
+  Play,
+  Square,
+  RotateCcw,
+  ChevronLeft,
+  X,
+  Grip,
+  Loader2,
+} from "lucide-react";
 import ExpressionStats from "../components/expressionStats";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -786,7 +794,7 @@ const VideoUpload = () => {
                     }}
                     className="absolute left-4 bottom-16 justify-between items-center flex gap-2 bg-black/80 text-white px-3 py-2 rounded-[0.25rem] text-left z-10 cursor-move select-none"
                   >
-                    <div className="text-sm text-left absolute top-5 left-5 right-5 bottom-5 overflow-y-auto prose prose-sm prose-invert max-w-none">
+                    <div className="text-sm text-left absolute top-5 left-5 right-5 bottom-5 overflow-y-auto prose prose-sm prose-invert max-w-none prose-p:mb-6">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {transcript}
                       </ReactMarkdown>
@@ -850,9 +858,16 @@ const VideoUpload = () => {
               color: generatingTranscript ? "var(--pink-700)" : undefined,
             }}
           >
-            {generatingTranscript
-              ? "Generating Transcript"
-              : "Generate Transcript"}
+            {generatingTranscript ? (
+              <div className="flex justify-center items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Generating
+                Transcript
+              </div>
+            ) : (
+              <div className="flex justify-center items-center gap-2">
+                Generate Transcript
+              </div>
+            )}
           </button>
         </div>
       )}
@@ -886,7 +901,7 @@ const VideoUpload = () => {
           </div>
           <div className="flex flex-col w-full items-center justify-center">
             <div className="text-lg font-bold mb-8">Transcript Analysis</div>
-            <div className="text-sm text-gray-700 text-left prose prose-sm max-w-none [&>p]:mb-4 [&>p:last-child]:mb-0">
+            <div className="text-sm text-gray-700 text-left prose prose-sm max-w-none prose-p:mb-6">
               {transcriptAnalysis && (
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {transcriptAnalysis}

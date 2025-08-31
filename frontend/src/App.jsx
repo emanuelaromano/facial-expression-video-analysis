@@ -66,7 +66,7 @@ function App() {
           />
 
           <Route
-            path="video-upload"
+            path="upload"
             element={
               <RequireAuth status={authStatus}>
                 <VideoUpload />
