@@ -19,9 +19,17 @@ elif [ "$1" == "-g" ]; then
 elif [ "$1" == "-f" ]; then
     cd frontend
     npm run dev
-    cd ..
+    cd .. 
 elif [ "$1" == "-fire" ]; then
     cd frontend
+    # Check if status is already prod
+    if grep -q "prod" api.jsx; then
+        echo "Status is already set to production"
+    else
+        # Update the status in the api.jsx file to the production URL
+        sed -i 's|dev|prod|g' api.jsx
+        echo "Status updated to production"
+    fi
     npm run build
     firebase deploy
 elif [ "$1" == "-b" ]; then

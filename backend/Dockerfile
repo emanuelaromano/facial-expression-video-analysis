@@ -101,4 +101,4 @@ RUN set -e; \
 COPY . /app
 
 ENV PORT=8080
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --no-access-log --log-level info --use-colors"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --log-level info --use-colors"]

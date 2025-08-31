@@ -164,6 +164,7 @@ def clear_cancel_event(uuid: str) -> None:
 ########################################################
 
 logger = logging.getLogger("hireview")
+logger.setLevel(logging.INFO)
 
 ########################################################
 # Video processing globals

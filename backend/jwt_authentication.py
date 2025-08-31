@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import jwt
-from fastapi import APIRouter, Header, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from http import HTTPStatus
 
@@ -44,15 +44,18 @@ def create_access_token(
 
 def decode_token(token: str) -> Optional[Dict[str, Any]]:
     try:
-        return jwt.decode(
+        token = jwt.decode(
             token,
             JWT_SECRET_KEY,
             algorithms=[JWT_ALGORITHM],
         )
+        return {"validated": True, "expired": False}
     except jwt.ExpiredSignatureError:
-        return None
+        return {"validated": False, "expired": True}
     except jwt.InvalidTokenError:
-        return None
+        return {"validated": False, "expired": False}
+    except Exception as e:
+        return {"validated": False, "expired": False}
 
 def create_guest_token() -> str:
     return create_access_token({"sub": "guest", "type": "access"})
@@ -70,7 +73,7 @@ def validate_token_endpoint(credentials: HTTPAuthorizationCredentials = Depends(
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
     try:
         payload = decode_token(credentials.credentials)
-        return {"validated": bool(payload)} 
+        return payload
     except Exception as e:
         raise HTTPException(status_code=401, detail="Token validation failed: " + str(e))
 
