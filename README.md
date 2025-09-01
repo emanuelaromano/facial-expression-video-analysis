@@ -13,6 +13,13 @@ A comprehensive interview preparation platform that analyzes video recordings to
 - **Real-time Processing**: Background task processing with status updates
 - **Cloud Deployment**: Ready for Google Cloud Run and Firebase hosting
 
+## 🎥 Demo
+
+<video width="100%" controls>
+  <source src="Demo.mov" type="video/quicktime">
+  Your browser does not support the video tag.
+</video>
+
 ## 🏗️ Architecture
 
 ### Frontend (React + Vite)
