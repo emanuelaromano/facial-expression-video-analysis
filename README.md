@@ -14,17 +14,7 @@ A comprehensive interview preparation platform that analyzes video recordings to
 - **Cloud Deployment**: Ready for Google Cloud Run and Firebase hosting
 
 ## 🎥 Demo
-
-<!-- Option 1: HTML video tag (works immediately) -->
-<video width="100%" controls>
-  <source src="demo.mp4" type="video/quicktime">
-  Your browser does not support the video tag.
-</video>
-
-<!-- Option 2: GitHub asset link (requires uploading to GitHub first) -->
-<!-- To use this, upload Demo.mov to GitHub as an asset, then replace with the generated URL -->
-<!-- https://github.com/emanuelaromano/hireview-prep/assets/Demo.mov -->
-
+https://github.com/emanuelaromano/hireview-prep/issues/1#issue-3372920094
 
 ## 🏗️ Architecture
 
