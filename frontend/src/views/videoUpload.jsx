@@ -13,6 +13,8 @@ import {
   X,
   Grip,
   Loader2,
+  Paperclip,
+  Trash2,
 } from "lucide-react";
 import ExpressionStats from "../components/expressionStats";
 import ReactMarkdown from "react-markdown";
@@ -32,9 +34,10 @@ const VideoUpload = () => {
   const transcriptRef = useRef(null);
   const dragStartRef = useRef({ x: 0, y: 0, mx: 0, my: 0 });
   const resizeStartRef = useRef({ tx: 0, ty: 0, w: 0, h: 0 });
+  const contextDocumentsInputRef = useRef(null);
+
   const [scenario, setScenario] = useState("");
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
-
   const [selectedFile, setSelectedFile] = useState(null);
   const [recordVideo, setRecordVideo] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -49,12 +52,21 @@ const VideoUpload = () => {
   const [transcriptPositionY, setTranscriptPositionY] = useState(0);
   const [transcriptWidth, setTranscriptWidth] = useState(0);
   const [transcriptHeight, setTranscriptHeight] = useState(0);
+  const [contextDocuments, setContextDocuments] = useState([]);
+
+  // Debug: Track when contextDocuments state changes
+  useEffect(() => {
+    console.log("contextDocuments state changed to:", contextDocuments);
+  }, [contextDocuments]);
   const [progress, setProgress] = useState({
     percent: 0,
     state: "initializing",
   });
   const [transcriptAnalysis, setTranscriptAnalysis] = useState(null);
   const [expressionStats, setExpressionStats] = useState(null);
+
+  // Debug: Log contextDocuments on every render
+  console.log("VideoUpload render - contextDocuments:", contextDocuments);
 
   // Memoize the video URL to prevent recreation on every render
   const videoUrl = useMemo(() => {
@@ -70,51 +82,60 @@ const VideoUpload = () => {
     }
   }, [mediaStream]);
 
-  const resetVideoState = useCallback(() => {
-    if (analysisAbortRef.current) {
-      // If analysis is running, abort it first
-      analysisAbortRef.current.abort();
-      fetch(`${API_URL}/video/cancel/${videoId}`, { method: "POST" }).catch(
-        () => {},
-      );
-    }
+  const resetVideoState = useCallback(
+    (excludeContextDocuments = false, excludeScenario = false) => {
+      if (analysisAbortRef.current) {
+        // If analysis is running, abort it first
+        analysisAbortRef.current.abort();
+        fetch(`${API_URL}/video/cancel/${videoId}`, { method: "POST" }).catch(
+          () => {},
+        );
+      }
 
-    // Clear any ongoing polling
-    if (window.currentPollInterval) {
-      clearTimeout(window.currentPollInterval);
-      window.currentPollInterval = null;
-    }
+      // Clear any ongoing polling
+      if (window.currentPollInterval) {
+        clearTimeout(window.currentPollInterval);
+        window.currentPollInterval = null;
+      }
 
-    stopMediaStream();
-    setSelectedFile(null);
-    setWasRecorded(false);
-    setTranscript(null);
-    setGeneratingTranscript(false);
-    setRecordVideo(false);
-    setRecording(false);
-    setProcessedVideoUrl(null);
-    setTranscriptAnalysis(null);
-    setExpressionStats(null);
-    setProgress({ percent: 0, state: "initializing" });
-    setAnalyzing(false);
-    setCameraLoading(false);
-    setTranscriptPositionX(0);
-    setTranscriptPositionY(0);
-    setTranscriptWidth(0);
-    setTranscriptHeight(0);
-    const newIndex =
-      currentSectionIndex - 1 === 2 ? 1 : currentSectionIndex - 1;
-    setCurrentSectionIndex(newIndex);
+      stopMediaStream();
+      setSelectedFile(null);
+      setWasRecorded(false);
+      setTranscript(null);
+      setGeneratingTranscript(false);
+      setRecordVideo(false);
+      setRecording(false);
+      setProcessedVideoUrl(null);
+      setTranscriptAnalysis(null);
+      setExpressionStats(null);
+      setProgress({ percent: 0, state: "initializing" });
+      setAnalyzing(false);
+      setCameraLoading(false);
+      setTranscriptPositionX(0);
+      setTranscriptPositionY(0);
+      setTranscriptWidth(0);
+      setTranscriptHeight(0);
+      if (!excludeContextDocuments) {
+        setContextDocuments([]);
+      }
+      if (!excludeScenario) {
+        setScenario("");
+      }
+      const newIndex =
+        currentSectionIndex - 1 === 2 ? 1 : currentSectionIndex - 1;
+      setCurrentSectionIndex(newIndex);
 
-    // Reset video element
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-      videoRef.current.load();
-    }
+      // Reset video element
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+        videoRef.current.load();
+      }
 
-    // Reset the video ID for a fresh analysis
-    videoIdRef.current = uuidv4();
-  }, [stopMediaStream, videoId, currentSectionIndex]);
+      // Reset the video ID for a fresh analysis
+      videoIdRef.current = uuidv4();
+    },
+    [stopMediaStream, videoId, currentSectionIndex],
+  );
 
   const handleVideoUpload = useCallback(
     (e) => {
@@ -132,7 +153,7 @@ const VideoUpload = () => {
           window.currentPollInterval = null;
         }
       }
-      resetVideoState();
+      resetVideoState(true, true);
       const file = e.target.files[0];
       if (file) {
         dispatch(setBannerThunk("Video uploaded successfully", "success"));
@@ -184,7 +205,7 @@ const VideoUpload = () => {
       fileInputRef.current.value = "";
     }
 
-    resetVideoState();
+    resetVideoState(true, true);
     setRecordVideo(true);
     setCameraLoading(true);
     setCurrentSectionIndex(2);
@@ -291,6 +312,10 @@ const VideoUpload = () => {
   };
 
   const handleRunAnalysis = useCallback(async () => {
+    console.log(
+      "handleRunAnalysis called - contextDocuments:",
+      contextDocuments,
+    );
     if (!selectedFile) {
       dispatch(
         setBannerThunk("Please upload or record a video first", "error"),
@@ -372,8 +397,31 @@ const VideoUpload = () => {
       formData.append("gcs_path", gcs_path);
       formData.append("scenario_description", scenario);
 
+      console.log(
+        "About to check contextDocuments, length:",
+        contextDocuments.length,
+      );
+      console.log("contextDocuments state:", contextDocuments);
+
+      if (contextDocuments.length > 0) {
+        console.log("Context documents array:", contextDocuments);
+        for (const file of contextDocuments) {
+          console.log(
+            "Adding file to FormData:",
+            file.name,
+            file.size,
+            file.type,
+          );
+          formData.append("context_documents", file, file.name);
+        }
+      } else {
+        console.log("No context documents found in state");
+      }
+      console.log("Form data:", formData.getAll("context_documents"));
       const response = await axios.post(`${API_URL}/video/analyze`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
         responseType: "blob",
         signal: controller.signal,
       });
@@ -425,7 +473,7 @@ const VideoUpload = () => {
         window.currentPollInterval = null;
       }
     }
-  }, [selectedFile, videoId, dispatch, scenario]);
+  }, [selectedFile, videoId, dispatch, scenario, contextDocuments]);
 
   useEffect(() => {
     if (mediaStream && videoRef.current) {
@@ -469,11 +517,21 @@ const VideoUpload = () => {
     setTranscript(null);
     const formData = new FormData();
     formData.append("scenario_description", scenario);
+    if (contextDocuments.length > 0) {
+      for (const file of contextDocuments) {
+        formData.append("context_documents", file, file.name);
+      }
+    }
 
     try {
       const response = await axios.post(
         `${API_URL}/video/transcript`,
         formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        },
       );
       if (
         response.status < 200 ||
@@ -488,6 +546,42 @@ const VideoUpload = () => {
       dispatch(setBannerThunk("Failed to generate transcript", "error"));
     } finally {
       setGeneratingTranscript(false);
+    }
+  };
+
+  const handleContextDocumentsUpload = (e) => {
+    console.log("File input change event triggered");
+    console.log("Event target:", e.target);
+    console.log("Event target files:", e.target.files);
+    const files = e.target.files;
+    console.log("Files selected:", files);
+    console.log("Current contextDocuments:", contextDocuments);
+
+    let contextDocumentsSize =
+      contextDocuments.map((file) => file.size).reduce((a, b) => a + b, 0) +
+      Array.from(files).reduce((a, b) => a + b.size, 0);
+
+    if (contextDocumentsSize > 25_000_000) {
+      dispatch(
+        setBannerThunk(
+          "Maximum context documents size exceeded (25MB)",
+          "error",
+        ),
+      );
+      return;
+    }
+
+    try {
+      const newFiles = Array.from(files);
+      console.log("New files to add:", newFiles);
+      const updatedContextDocuments = [...contextDocuments, ...newFiles];
+      console.log("Updated contextDocuments:", updatedContextDocuments);
+      setContextDocuments(updatedContextDocuments);
+      dispatch(setBannerThunk("Context documents uploaded", "success"));
+    } catch (err) {
+      console.error("Failed to upload context documents:", err);
+      dispatch(setBannerThunk("Failed to upload context documents", "error"));
+      setContextDocuments([]);
     }
   };
 
@@ -594,29 +688,81 @@ const VideoUpload = () => {
           )}
           <div className="flex flex-col w-full p-20">
             <div
-              className={`flex w-[80%] absolute top-[50%] flex-col justify-center items-center gap-5 transition-all duration-500 ease-in-out 
+              className={`flex w-[80%] absolute top-[45%] flex-col justify-center items-center gap-5 transition-all duration-500 ease-in-out 
               ${currentSectionIndex === 0 ? "left-[50%] translate-x-[-50%] translate-y-[-50%]" : "left-[-50%] translate-x-[-50%] translate-y-[-50%]"}`}
             >
-              <div className="text-sm text-gray-600">
-                Enter the scenario you want to practice for.
+              <div className="text-sm text-gray-600 flex flex-col gap-2">
+                <p>Enter the practice scenario.</p>
               </div>
               <div className="flex flex-col w-full gap-2 justify-center items-center">
                 <div className="relative w-full pb-5">
                   <textarea
-                    className="primary-textbox w-full h-[10rem]"
+                    className="primary-textbox w-full h-[10rem] !pr-12"
                     type="text"
                     placeholder="Scenario"
                     value={scenario}
                     maxLength={500}
                     onChange={(e) => setScenario(e.target.value)}
                   />
-                  <p className="text-[0.65rem] text-gray-600 absolute bottom-0.5 right-4">
-                    {scenario.length} / 500
+                  <div className="absolute top-2 right-2">
+                    <div className="relative flex group">
+                      <Paperclip
+                        onClick={() => {
+                          console.log(
+                            "Paperclip clicked, file input ref:",
+                            contextDocumentsInputRef.current,
+                          );
+                          contextDocumentsInputRef.current.click();
+                        }}
+                        className={`w-4 h-4 cursor-pointer ${
+                          contextDocuments.length > 0
+                            ? "text-green-400 hover:text-green-600"
+                            : "text-gray-400 hover:text-gray-600"
+                        }`}
+                      />
+                      <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-0.5 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 left-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
+                        Upload
+                      </p>
+                    </div>
+                  </div>
+                  {contextDocuments.length > 0 && (
+                    <div className="absolute top-2 right-7">
+                      <div className="relative flex group">
+                        <Trash2
+                          onClick={() => {
+                            setContextDocuments([]);
+                          }}
+                          className="w-4 h-4 cursor-pointer text-red-400 hover:text-red-600"
+                        />
+                        <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-0.5 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full ml-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
+                          Delete
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  <input
+                    ref={contextDocumentsInputRef}
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    multiple
+                    onChange={handleContextDocumentsUpload}
+                  />
+
+                  <p className="text-[0.65rem] text-gray-600 absolute bottom-0 left-2">
+                    {scenario.length} / 500 chars
+                  </p>
+                  <p className="text-[0.65rem] text-gray-600 absolute bottom-0 right-2">
+                    {contextDocuments.length} {"files"} (Max 25MB)
                   </p>
                 </div>
 
                 <button
                   onClick={() => {
+                    console.log(
+                      "Submit and continue clicked - contextDocuments:",
+                      contextDocuments,
+                    );
                     if (!scenario.length) {
                       dispatch(
                         setBannerThunk(
@@ -701,7 +847,7 @@ const VideoUpload = () => {
               <div className="absolute top-2 right-2 flex flex-col gap-2">
                 <div className="relative flex group">
                   <X
-                    onClick={resetVideoState}
+                    onClick={() => resetVideoState(true, true)}
                     className="w-8 h-8 cursor-pointer font-mono text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-[0.25rem] p-1"
                   />
                   <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100 whitespace-nowrap">
@@ -815,7 +961,7 @@ const VideoUpload = () => {
           <div className="absolute aspect-video top-2 right-2 flex flex-col gap-2">
             <div className="relative flex group">
               <X
-                onClick={resetVideoState}
+                onClick={() => resetVideoState(true, true)}
                 className="w-8 h-8 cursor-pointer text-white bg-[var(--pink-500)] hover:bg-[var(--pink-700)] rounded-[0.25rem] p-1"
               />
               <p className="pointer-events-none bg-black/50 transition-opacity duration-150 p-2 py-1 rounded-[0.25rem] text-white text-sm absolute top-1/2 -translate-y-1/2 right-full mr-2 opacity-0 group-hover:opacity-100">
@@ -922,7 +1068,7 @@ const VideoUpload = () => {
           </div>
           <button
             className="primary-button w-full"
-            onClick={() => resetVideoState()}
+            onClick={() => resetVideoState(true, true)}
           >
             Reset
           </button>

@@ -22,6 +22,7 @@ except Exception as e:
 def _status_key(uuid: str) -> str: return f"job:{uuid}:status"
 def _cancel_key(uuid: str) -> str: return f"job:{uuid}:cancel"
 def _channel(uuid: str) -> str: return f"job:{uuid}:ch"
+def _gcs_path_key(uuid: str) -> str: return f"job:{uuid}:gcs_path"
 
 async def _ensure_redis_connection():
     """Ensure Redis connection is available"""
@@ -91,3 +92,28 @@ async def clear_cancel(uuid: str):
         logger.debug(f"Cancel cleared for {uuid}")
     except Exception as e:
         logger.error(f"Failed to clear cancel for {uuid}: {e}")
+
+async def store_gcs_path(uuid: str, gcs_path: str):
+    try:
+        await _ensure_redis_connection()
+        await r.set(_gcs_path_key(uuid), gcs_path, ex=3600)  # 1 hour expiry
+        logger.debug(f"GCS path stored for {uuid}: {gcs_path}")
+    except Exception as e:
+        logger.error(f"Failed to store GCS path for {uuid}: {e}")
+
+async def get_gcs_path(uuid: str) -> str:
+    try:
+        await _ensure_redis_connection()
+        gcs_path = await r.get(_gcs_path_key(uuid))
+        return gcs_path
+    except Exception as e:
+        logger.error(f"Failed to get GCS path for {uuid}: {e}")
+        return None
+
+async def clear_gcs_path(uuid: str):
+    try:
+        await _ensure_redis_connection()
+        await r.delete(_gcs_path_key(uuid))
+        logger.debug(f"GCS path cleared for {uuid}")
+    except Exception as e:
+        logger.error(f"Failed to clear GCS path for {uuid}: {e}")

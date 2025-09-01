@@ -3,7 +3,7 @@ import cv2
 import logging
 import subprocess
 from dotenv import load_dotenv
-from fastapi import APIRouter, UploadFile, Form, BackgroundTasks, HTTPException
+from fastapi import APIRouter, UploadFile, Form, BackgroundTasks, HTTPException, File
 from fastapi.responses import FileResponse
 from http import HTTPStatus
 from transformers import AutoImageProcessor, AutoModelForImageClassification
@@ -11,7 +11,7 @@ import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import mediapipe as mp
 from threading import Lock, Event
-from typing import Optional, Dict
+from typing import List, Optional, Dict
 from openai import OpenAI
 from zipfile import ZipFile, ZIP_DEFLATED
 from fractions import Fraction
@@ -27,7 +27,8 @@ import google.auth
 from google.auth import impersonated_credentials
 from google.api_core.exceptions import NotFound
 import os
-from redis_stream import set_status, get_status, clear_status, mark_cancel, is_cancelled, clear_cancel, r, _channel
+from redis_stream import set_status, get_status, clear_status, mark_cancel, is_cancelled, clear_cancel, store_gcs_path, get_gcs_path, clear_gcs_path, r, _channel
+import base64
 
 load_dotenv()
 
@@ -104,28 +105,39 @@ def init_once():
 # Delayed cleanup functions
 ########################################################
 
-async def delayed_rmtree(path: str, delay_seconds: int = 30):
-    await asyncio.sleep(delay_seconds)
+async def delayed_cleanup(uuid: str, cleanup_type: list[str], path: str = None, gcs_path: str = None, delay_seconds: int = 30):
+    if delay_seconds > 0:
+        await asyncio.sleep(delay_seconds)
+    
     try:
-        if path == TEMP_BASE:
-            for name in os.listdir(path):
-                p = os.path.join(path, name)
-                if os.path.isfile(p) or os.path.islink(p):
-                    os.unlink(p)
-                elif os.path.isdir(p):
-                    shutil.rmtree(p, ignore_errors=True)
-            logger.info(f"Cleared contents of {path}")
-        else:
-            shutil.rmtree(path, ignore_errors=True)
-            logger.info(f"Deleted directory {path}")
+        if 'tmp' in cleanup_type or 'all' in cleanup_type:
+            if path == TEMP_BASE:
+                for name in os.listdir(path):
+                    p = os.path.join(path, name)
+                    if os.path.isfile(p) or os.path.islink(p):
+                        os.unlink(p)
+                    elif os.path.isdir(p):
+                        shutil.rmtree(p, ignore_errors=True)
+                logger.info(f"Cleared contents of {path}")
+            else:
+                shutil.rmtree(path, ignore_errors=True)
+                logger.info(f"Deleted directory {path}")
+                
+        if 'status' in cleanup_type or 'all' in cleanup_type:
+            await clear_status(uuid)
+            logger.info(f"Cleaned up Redis status for {uuid}")
+            
+            
+        if 'video_storage' in cleanup_type or 'all' in cleanup_type:
+            await delete_video_from_storage(gcs_path)
+            logger.info(f"Successfully deleted video from storage after delay: {gcs_path}")
+            
+        if 'gcs_path' in cleanup_type or 'all' in cleanup_type:
+            await clear_gcs_path(uuid)
+            logger.info(f"Cleared GCS path for {uuid}")
+            
     except Exception as e:
-        logger.warning(f"Failed to clean up {path}: {e}")
-
-
-async def delayed_cleanup_status(uuid: str, delay_seconds: int = 30):
-    await asyncio.sleep(delay_seconds)
-    await clear_status(uuid)
-    logger.info(f"Cleaned up Redis status for {uuid}")
+        logger.warning(f"Failed to perform {cleanup_type} cleanup for {uuid}: {e}")
 
 ########################################################
 # Video processing globals
@@ -165,6 +177,14 @@ def clear_cancel_event(uuid: str) -> None:
 
 logger = logging.getLogger("hireview")
 logger.setLevel(logging.INFO)
+
+# Add console handler if none exists
+if not logger.handlers:
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
 
 ########################################################
 # Video processing globals
@@ -206,12 +226,30 @@ def get_storage_client():
         logger.error(f"Falling back to default credentials: {e}")
         return storage.Client()
 
+async def delete_video_from_storage(gcs_path: str) -> bool:
+    try:
+        if not gcs_path:
+            logger.warning("No GCS path provided for deletion")
+            return False
+            
+        client = get_storage_client()
+        bucket = client.bucket(BUCKET)
+        blob = bucket.blob(gcs_path)
+        
+        if blob.exists():
+            blob.delete()
+            logger.info(f"Successfully deleted video from GCS: {gcs_path}")
+            return True
+        else:
+            logger.warning(f"Video file not found in GCS for deletion: {gcs_path}")
+            return False
+    except Exception as e:
+        logger.error(f"Failed to delete video from GCS {gcs_path}: {e}")
+        return False
+
 ########################################################
 # SSE Streaming endpoints
 ########################################################
-
-
-
 
 @router.get("/status/{uuid}")
 async def read_status(uuid: str):
@@ -230,48 +268,17 @@ async def read_status(uuid: str):
         logger.error(f"Error reading status for {uuid}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to read status: {str(e)}")
 
-# Optional: long-poll variant (fewer requests; proxy-safe)
-@router.get("/status/{uuid}/wait")
-async def wait_status(uuid: str, last_progress: int = 0, timeout: int = 30):
-    try:
-        cur = await get_status(uuid)
-        if not isinstance(cur, dict):
-            cur = {"state": "not_started", "progress": 0}
-        if cur.get("progress", 0) > last_progress:
-            return cur
-
-        pubsub = r.pubsub()
-        await pubsub.subscribe(_channel(uuid))
-        try:
-            # wait up to `timeout` seconds for a progress bump
-            end = time.time() + timeout
-            async for msg in pubsub.listen():
-                if msg["type"] != "message":
-                    continue
-                data = json.loads(msg["data"])
-                prog = int(float(data.get("progress", 0)))
-                if prog > last_progress:
-                    return {"state": data["state"], "progress": prog, "ts": data.get("ts")}
-                if time.time() > end:
-                    break
-        finally:
-            await pubsub.close()
-        # timeout: return current snapshot
-        final_status = await get_status(uuid)
-        if not isinstance(final_status, dict):
-            return {"state": "not_started", "progress": 0}
-        return final_status
-    except Exception as e:
-        logger.error(f"Error in wait_status for {uuid}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to wait for status: {str(e)}")
-
 @router.post("/cancel/{uuid}")
 async def cancel_job(uuid: str):
     try:
         await mark_cancel(uuid)
         ev = get_cancel_event(uuid)
         ev.set()
-        asyncio.create_task(delayed_rmtree(os.path.join(TEMP_BASE, uuid), 0))
+        
+        # Clean up local temp files and video from storage
+        gcs_path = await get_gcs_path(uuid)
+        asyncio.create_task(delayed_cleanup(uuid, ["all"], path=os.path.join(TEMP_BASE, uuid), gcs_path=gcs_path, delay_seconds=0))
+        
         return {"ok": True, "cancelled": uuid}
     except Exception as e:
         logger.error(f"Error cancelling job {uuid}: {e}")
@@ -294,6 +301,13 @@ async def get_signed_upload_url(uuid: str, filename: str):
     client = get_storage_client()
     blob_path = f"hireview/{uuid}/{decoded_filename}"
     blob = client.bucket(BUCKET).blob(blob_path)
+    
+    # Store GCS path for potential cleanup operations
+    await store_gcs_path(uuid, blob.name)
+    
+    # Schedule cleanup of orphaned videos (uploaded but never processed)
+    asyncio.create_task(delayed_cleanup(uuid, ["all"], gcs_path=blob.name, delay_seconds=7200))
+    
     url = blob.generate_signed_url(
         version="v4",
         expiration=timedelta(minutes=10),
@@ -317,10 +331,17 @@ async def analyze_video(
     uuid: str = Form(...),
     gcs_path: str = Form(...), 
     scenario_description: str = Form(...),
+    context_documents: Optional[List[UploadFile]] = File(None), 
 ):
+    if not context_documents:
+        context_documents = []
+
     cancel_event = get_cancel_event(uuid)
     await clear_cancel(uuid)
     await set_status(uuid, "processing", 5)
+    
+    # Store GCS path for potential cleanup operations
+    await store_gcs_path(uuid, gcs_path)
     
     temp_dir = os.path.join(TEMP_BASE, uuid)
     temp_og_video_path = os.path.join(temp_dir, "video.mp4")
@@ -491,7 +512,7 @@ async def analyze_video(
         logger.info(f"Output video size: {os.path.getsize(rebuilt_video_path)} bytes")
         # Spoken-content analysis (guard for missing audio)
         await set_status(uuid, "transcribing audio", 95)
-        analyze_spoken_content(audio_path, scenario_description, analysis_path, cancel_event)
+        analyze_spoken_content(audio_path, scenario_description, analysis_path, cancel_event, context_documents)
         await set_status(uuid, "saving analysis", 98)
         with open(expressions_path, "w") as f:
             json.dump(normalized_expression_stats, f)
@@ -544,10 +565,8 @@ async def analyze_video(
         # Finalize
         await set_status(uuid, "completed", 100)
         
-        # Cleanup AFTER response is sent
-        background_tasks.add_task(delayed_rmtree, temp_dir, 30)
-        # Also cleanup status after a delay to ensure streaming is complete
-        background_tasks.add_task(delayed_cleanup_status, uuid, 30)
+        # Clean up all resources after a delay
+        background_tasks.add_task(delayed_cleanup, uuid, ["all"], path=temp_dir, gcs_path=gcs_path, delay_seconds=30)
 
         return FileResponse(
             path=bundle_path,
@@ -562,23 +581,30 @@ async def analyze_video(
             await set_status(uuid, "error", (await get_status(uuid)).get("progress", 0))
         except: 
             pass
-        # Best effort: if a partially created bundle exists, return a 500 instead of streaming it
+        
+        # Clean up video from storage on error
+        try:
+            background_tasks.add_task(delayed_cleanup, uuid, ["all"], path=temp_dir, gcs_path=gcs_path, delay_seconds=0)
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to cleanup video from storage on error: {cleanup_error}")
+        
+        # If a partially created bundle exists, return a 500 instead of streaming it
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
     finally:
-        # ensure we clear the cancel event so future jobs reuse a clean state
+        # Ensure we clear the cancel event so future jobs reuse a clean state
         clear_cancel_event(uuid)
 
 
 @router.post("/transcript", status_code=HTTPStatus.OK)
-async def generate_video_transcript(scenario_description: str = Form(...)):
+async def generate_video_transcript(scenario_description: str = Form(...), context_documents: list[UploadFile] = File(...)):
     try:
-        transcript = generate_transcript(scenario_description)
+        transcript = generate_transcript(scenario_description, context_documents)
         return {
             "transcript": transcript
         }
     except Exception as e:
         logger.exception("unexpected error in generate_video_transcript")
-        raise Exception(f"Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
 
 ########################################################
 # Video processing functions
@@ -948,7 +974,7 @@ def transcribe_audio(audio_path: str, cancel_event: Event) -> str:
 class SpokenContentAnalysis(BaseModel):
     analysis: str = Field(description="The analysis of the spoken content")
 
-def analyze_spoken_content(audio_path: str, scenario_description: str, analysis_path: str, cancel_event: Event) -> None:
+def analyze_spoken_content(audio_path: str, scenario_description: str, analysis_path: str, cancel_event: Event, context_documents: list[UploadFile]) -> None:
     spoken_content_analysis = "No audio stream found."
     try:
         if audio_path:
@@ -960,15 +986,33 @@ def analyze_spoken_content(audio_path: str, scenario_description: str, analysis_
             else:
                 if cancel_event.is_set():
                     return
+                
+                processed_files = []
+                # Read the file content and encode to base64
+                for doc in context_documents:
+                    doc.file.seek(0)
+                    file_content = doc.file.read()
+                    
+                    # Encode to base64
+                    base64_string = base64.b64encode(file_content).decode("utf-8")
+                    
+                    # Create the data URL with proper MIME type
+                    data_url = f"data:{doc.content_type};base64,{base64_string}"
+                    processed_files.append({"url": data_url, "filename": doc.filename})
+
+                user_message = {"role": "user", "content": [{"type": "input_text", "text": transcript}]}
+
+                for file in processed_files:
+                    user_message["content"].append({"type": "input_file", "filename": file["filename"], "file_data": file["url"]})
 
                 response = client.responses.parse(
                     model="gpt-4o-mini",
                     input=[
-                        {"role": "system",
-                        "content": f"""
-                        You are a speech coach. Analyze the following interview answer and give concise, actionable feedback. The scenario description is: {scenario_description}
-                        """},
-                        {"role": "user", "content": transcript},
+                        {
+                            "role": "system", 
+                            "content": f"You are a speech coach. Analyze the following interview answer and give concise, actionable feedback. The scenario description is: {scenario_description}. The files provided are only for context. You should focus on the transcript and give feedback on the speech."
+                        },
+                        user_message,
                     ],
                     text_format=SpokenContentAnalysis,
                 )
@@ -979,6 +1023,37 @@ def analyze_spoken_content(audio_path: str, scenario_description: str, analysis_
 
     with open(analysis_path, "w", encoding="utf-8") as f:
         f.write(spoken_content_analysis)
+
+@router.post("/analysis", status_code=HTTPStatus.OK)
+async def openai_analyze(
+    files: List[UploadFile] = File(...),
+):
+    try:
+        processed_files = []
+        # Read the file content
+        for file in files:
+            file.file.seek(0)
+            file_content = file.file.read()
+            
+            # Encode to base64
+            base64_string = base64.b64encode(file_content).decode("utf-8")
+            
+            # Create the data URL with proper MIME type
+            data_url = f"data:{file.content_type};base64,{base64_string}"
+            processed_files.append({"url": data_url, "filename": file.filename})
+
+        user_message = {"role": "user", "content": [{"type": "input_text", "text": "Please analyze the following files and provide insights."}]}
+        for file in processed_files:
+            user_message["content"].append({"type": "input_file", "filename": file["filename"], "file_data": file["url"]})
+        
+        response = client.responses.create(
+            model="gpt-4o-mini",
+            input=[user_message],
+        )
+        return response.output_text
+    except Exception as e:
+        logger.error(f"Error in file analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 def normalize_expression_stats(expression_stats: dict) -> dict:
     # Normalize the expression stats to be between 0 and 1
@@ -1002,15 +1077,37 @@ def normalize_expression_stats(expression_stats: dict) -> dict:
 class TranscriptResponse(BaseModel):
     transcript: str = Field(description="The transcript of the speech")
 
-def generate_transcript(scenario_description: str) -> str:
-    response = client.responses.parse(
-        model="gpt-4o-mini",
-        input=[
-            {
-                "role": "system",
-                "content": f"You are a speech coach. The user is practicing a speech. The scenario description is: {scenario_description}. Write a transcript of the speech in the user's own words.",
-            },
-        ],
-        text_format=TranscriptResponse,
-    )
-    return response.output_parsed.transcript
+def generate_transcript(scenario_description: str, context_documents: list[UploadFile]) -> str:
+    try:
+        processed_files = []
+        # Read the file content
+        for file in context_documents:
+            file.file.seek(0)
+            file_content = file.file.read()
+            
+            # Encode to base64
+            base64_string = base64.b64encode(file_content).decode("utf-8")
+            
+            # Create the data URL with proper MIME type
+            data_url = f"data:{file.content_type};base64,{base64_string}"
+            processed_files.append({"url": data_url, "filename": file.filename})
+
+        user_message = {"role": "user", "content": [{"type": "input_text", "text": "Please write a transcript of the speech in the user's own words."}]}
+        for file in processed_files:
+            user_message["content"].append({"type": "input_file", "filename": file["filename"], "file_data": file["url"]})
+        
+        response = client.responses.parse(
+            model="gpt-4o-mini",
+            input=[
+                {
+                    "role": "system",
+                    "content": f"You are a speech coach. The user is practicing a speech. The scenario description is: {scenario_description}. Write a transcript of the speech in the user's own words.",
+                },
+                user_message,
+            ],
+            text_format=TranscriptResponse,
+        )
+        return response.output_parsed.transcript
+    except Exception as e:
+        logger.error(f"Error in transcript generation: {e}")
+        raise HTTPException(status_code=500, detail=f"Transcript generation failed: {str(e)}")

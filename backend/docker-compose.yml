@@ -24,7 +24,7 @@ services:
       - PYTHONUNBUFFERED=1
       - FACE_MESH_EVERY=2
       - EMOTION_EVERY=10
-      - NUM_WORKERS=1
+      - NUM_WORKERS=4
       - PORT=8080
       - GOOGLE_CLOUD_PROJECT=hireview-prep-470120
       - TARGET_SERVICE_ACCOUNT=916307297241-compute@developer.gserviceaccount.com
