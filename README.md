@@ -14,7 +14,10 @@ A comprehensive interview preparation platform that analyzes video recordings to
 - **Cloud Deployment**: Ready for Google Cloud Run and Firebase hosting
 
 ## 🎥 Demo
-https://github.com/emanuelaromano/hireview-prep/issues/1#issue-3372920094
+
+📹 **[Watch Demo Video](https://github.com/emanuelaromano/hireview-prep/issues/1#issue-3372920094)**
+
+*Click the link above to view the demo video showcasing HireView Prep's features and capabilities.*
 
 ## 🏗️ Architecture
 
