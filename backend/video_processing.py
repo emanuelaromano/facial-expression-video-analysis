@@ -146,8 +146,8 @@ async def delayed_cleanup(uuid: str, cleanup_type: list[str], path: str = None, 
 TEMP_ROOT = os.getenv("TEMP_ROOT", "/tmp")              
 TEMP_BASE = os.getenv("TEMP_BASE", os.path.join(TEMP_ROOT, "hireview"))
 BUCKET = os.getenv("BUCKET", "backend-app-storage")
-PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "hireview-prep-470120")
-TARGET_SA = os.getenv("TARGET_SERVICE_ACCOUNT", "916307297241-compute@developer.gserviceaccount.com")
+PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+TARGET_SA = os.getenv("TARGET_SERVICE_ACCOUNT")
 SCOPES = ["https://www.googleapis.com/auth/devstorage.read_write"]
 
 router = APIRouter()
