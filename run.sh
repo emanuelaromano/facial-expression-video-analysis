@@ -48,7 +48,7 @@ elif [ "$1" == "-build-deploy" ]; then
     cd ..
     gcloud run deploy backend-app \
         --region=us-central1 \
-        --image us-central1-docker.pkg.dev/hireview-prep-470120/cloud-run-source-deploy/backend-app:latest \
+        --image us-central1-docker.pkg.dev/$(gcloud config get-value project)/cloud-run-source-deploy/backend-app:latest \
         --allow-unauthenticated
 elif [ "$1" == "-build" ]; then
     cd backend
@@ -59,7 +59,7 @@ elif [ "$1" == "-build" ]; then
 elif [ "$1" == "-deploy" ]; then
     gcloud run deploy backend-app \
         --region=us-central1 \
-        --image us-central1-docker.pkg.dev/hireview-prep-470120/cloud-run-source-deploy/backend-app:latest \
+        --image us-central1-docker.pkg.dev/$(gcloud config get-value project)/cloud-run-source-deploy/backend-app:latest \
         --allow-unauthenticated
     cd ..
 else
