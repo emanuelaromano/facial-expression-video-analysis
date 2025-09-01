@@ -17,7 +17,7 @@ A comprehensive interview preparation platform that analyzes video recordings to
 
 <!-- Option 1: HTML video tag (works immediately) -->
 <video width="100%" controls>
-  <source src="Demo.mov" type="video/quicktime">
+  <source src="demo.mp4" type="video/quicktime">
   Your browser does not support the video tag.
 </video>
 
