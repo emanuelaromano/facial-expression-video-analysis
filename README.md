@@ -27,7 +27,6 @@ A comprehensive interview preparation platform that analyzes video recordings to
 - **Tailwind CSS + DaisyUI** for styling
 - **React Router** for navigation
 - **Plotly.js** for data visualization
-- **FFmpeg.wasm** for client-side video processing
 
 ### Backend (FastAPI + Python)
 - **FastAPI** for high-performance API
