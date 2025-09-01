@@ -1024,36 +1024,6 @@ def analyze_spoken_content(audio_path: str, scenario_description: str, analysis_
     with open(analysis_path, "w", encoding="utf-8") as f:
         f.write(spoken_content_analysis)
 
-@router.post("/analysis", status_code=HTTPStatus.OK)
-async def openai_analyze(
-    files: List[UploadFile] = File(...),
-):
-    try:
-        processed_files = []
-        # Read the file content
-        for file in files:
-            file.file.seek(0)
-            file_content = file.file.read()
-            
-            # Encode to base64
-            base64_string = base64.b64encode(file_content).decode("utf-8")
-            
-            # Create the data URL with proper MIME type
-            data_url = f"data:{file.content_type};base64,{base64_string}"
-            processed_files.append({"url": data_url, "filename": file.filename})
-
-        user_message = {"role": "user", "content": [{"type": "input_text", "text": "Please analyze the following files and provide insights."}]}
-        for file in processed_files:
-            user_message["content"].append({"type": "input_file", "filename": file["filename"], "file_data": file["url"]})
-        
-        response = client.responses.create(
-            model="gpt-4o-mini",
-            input=[user_message],
-        )
-        return response.output_text
-    except Exception as e:
-        logger.error(f"Error in file analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 def normalize_expression_stats(expression_stats: dict) -> dict:
     # Normalize the expression stats to be between 0 and 1
