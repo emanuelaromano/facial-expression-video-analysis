@@ -1,4 +1,4 @@
-# HireView Prep
+# Facial Expression Video Analysis
 
 A comprehensive interview preparation platform that analyzes video recordings to provide feedback on facial expressions, emotions, and speech patterns. Built with React frontend and FastAPI backend, featuring AI-powered analysis using MediaPipe, OpenAI, and emotion detection models.
 
@@ -17,7 +17,7 @@ A comprehensive interview preparation platform that analyzes video recordings to
 
 📹 **[Watch Demo Video](https://drive.google.com/file/d/1GJpngJhNhCaO8YQfZWhm5zzVYr7yIsne/view?usp=sharing)**
 
-*Click the link above to view the demo video showcasing HireView Prep's features and capabilities.*
+*Click the link above to view the demo video showcasing features and capabilities.*
 
 ## 🏗️ Architecture
 
