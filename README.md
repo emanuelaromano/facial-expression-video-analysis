@@ -15,7 +15,7 @@ A comprehensive interview preparation platform that analyzes video recordings to
 
 ## 🎥 Demo
 
-📹 **[Watch Demo Video](https://github.com/emanuelaromano/hireview-prep/issues/1#issue-3372920094)**
+📹 **[Watch Demo Video](https://drive.google.com/file/d/1GJpngJhNhCaO8YQfZWhm5zzVYr7yIsne/view?usp=sharing)**
 
 *Click the link above to view the demo video showcasing HireView Prep's features and capabilities.*
 
