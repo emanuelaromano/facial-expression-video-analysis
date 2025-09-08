@@ -2,7 +2,6 @@ substitutions:
   _REGION: us-central1
   _REPO: cloud-run-source-deploy
   _IMAGE: backend-app
-  _TAG: $BUILD_ID
 
 # backend/cloudbuild.yml
 steps:
@@ -16,14 +15,14 @@ steps:
         "--platform=linux/amd64",
         "--build-arg","BUILDKIT_INLINE_CACHE=1",
         "--cache-from","${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:latest",
-        "-t","${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:${_TAG}",
+        "-t","${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:$BUILD_ID",
         "."
       ]
   - name: gcr.io/cloud-builders/docker
     args:
       [
         "push",
-        "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:${_TAG}"
+        "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:$BUILD_ID"
       ]
 images:
-  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:${_TAG}"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:$BUILD_ID"
