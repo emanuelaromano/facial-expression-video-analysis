@@ -596,8 +596,10 @@ async def analyze_video(
 
 
 @router.post("/transcript", status_code=HTTPStatus.OK)
-async def generate_video_transcript(scenario_description: str = Form(...), context_documents: list[UploadFile] = File(...)):
+async def generate_video_transcript(scenario_description: str = Form(...), context_documents: Optional[List[UploadFile]] = File(None)):
     try:
+        if not context_documents:
+            context_documents = []
         transcript = generate_transcript(scenario_description, context_documents)
         return {
             "transcript": transcript

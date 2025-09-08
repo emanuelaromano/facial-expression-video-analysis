@@ -2,7 +2,7 @@ substitutions:
   _REGION: us-central1
   _REPO: cloud-run-source-deploy
   _IMAGE: backend-app
-  _TAG: latest
+  _TAG: $BUILD_ID
 
 # backend/cloudbuild.yml
 steps:

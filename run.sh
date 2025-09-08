@@ -52,16 +52,18 @@ elif [ "$1" == "-build-deploy" ]; then
         --allow-unauthenticated
 elif [ "$1" == "-build" ]; then
     cd backend
+    echo $(gcloud config get-value project)
     gcloud builds submit . \
         --config=cloudbuild.yml \
         --verbosity=debug
     cd ..
 elif [ "$1" == "-deploy" ]; then
+    LATEST_TAG=$(gcloud artifacts docker images list us-central1-docker.pkg.dev/$(gcloud config get-value project)/cloud-run-source-deploy/backend-app --format="value(tag)" --limit=1 --sort-by="~createTime")
+    echo "Deploying image with tag: $LATEST_TAG"
     gcloud run deploy backend-app \
         --region=us-central1 \
-        --image us-central1-docker.pkg.dev/$(gcloud config get-value project)/cloud-run-source-deploy/backend-app:latest \
+        --image us-central1-docker.pkg.dev/$(gcloud config get-value project)/cloud-run-source-deploy/backend-app:$LATEST_TAG \
         --allow-unauthenticated
-    cd ..
 else
     echo "Usage: ./run.sh [-f] [-g] [commit message]"
     echo "  -g: Commit and push changes to remote repository (optional commit message)"
