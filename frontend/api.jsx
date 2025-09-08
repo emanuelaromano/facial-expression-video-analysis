@@ -1,4 +1,4 @@
-let status = "dev";
+let status = "prod";
 
 export const API_URL =
   status !== "dev"

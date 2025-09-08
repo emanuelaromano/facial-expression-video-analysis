@@ -58,11 +58,18 @@ elif [ "$1" == "-build" ]; then
         --verbosity=debug
     cd ..
 elif [ "$1" == "-deploy" ]; then
-    LATEST_TAG=$(gcloud artifacts docker images list us-central1-docker.pkg.dev/$(gcloud config get-value project)/cloud-run-source-deploy/backend-app --format="value(tag)" --limit=1 --sort-by="~createTime")
-    echo "Deploying image with tag: $LATEST_TAG"
+    # Get the first line of the full output and extract the digest
+    LATEST_DIGEST=$(gcloud artifacts docker images list us-central1-docker.pkg.dev/$(gcloud config get-value project)/cloud-run-source-deploy/backend-app --limit=1 --sort-by="~createTime" | tail -n +2 | head -n 1 | awk '{print $2}')
+    
+    if [ -z "$LATEST_DIGEST" ]; then
+        echo "No images found in registry. Please run -build first."
+        exit 1
+    fi
+    
+    echo "Deploying image with digest: $LATEST_DIGEST"
     gcloud run deploy backend-app \
         --region=us-central1 \
-        --image us-central1-docker.pkg.dev/$(gcloud config get-value project)/cloud-run-source-deploy/backend-app:$LATEST_TAG \
+        --image us-central1-docker.pkg.dev/$(gcloud config get-value project)/cloud-run-source-deploy/backend-app@$LATEST_DIGEST \
         --allow-unauthenticated
 else
     echo "Usage: ./run.sh [-f] [-g] [commit message]"
